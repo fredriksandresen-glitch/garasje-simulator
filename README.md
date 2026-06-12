@@ -12,16 +12,16 @@ Garasje Simulator er satt opp for samme arbeidsflyt som Handball Tracker:
 
 ```bash
 cd src/frontend
-pnpm install
-pnpm run dev
+npm install
+npm run dev
 ```
 
 ## Build
 
 ```bash
 cd src/frontend
-pnpm install
-pnpm run build
+npm install
+npm run build
 ```
 
 Build-output havner i:
@@ -37,8 +37,8 @@ Vercel bør kobles til GitHub-repoet med disse innstillingene:
 ```text
 Framework Preset: Vite
 Root Directory: src/frontend
-Install Command: pnpm install
-Build Command: pnpm run build
+Install Command: npm install
+Build Command: npm run build
 Output Directory: dist
 ```
 
