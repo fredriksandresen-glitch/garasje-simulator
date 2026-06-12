@@ -1,0 +1,6 @@
+{
+  "framework": "vite",
+  "installCommand": "cd src/frontend && pnpm install",
+  "buildCommand": "cd src/frontend && pnpm run build",
+  "outputDirectory": "src/frontend/dist"
+}
