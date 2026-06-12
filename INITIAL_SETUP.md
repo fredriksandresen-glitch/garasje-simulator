@@ -19,8 +19,8 @@ Bruk disse innstillingene i Vercel:
 ```text
 Framework Preset: Vite
 Root Directory: src/frontend
-Install Command: pnpm install
-Build Command: pnpm run build
+Install Command: npm install
+Build Command: npm run build
 Output Directory: dist
 ```
 
@@ -54,8 +54,8 @@ git checkout main
 git log -1 --oneline
 
 cd src/frontend
-pnpm install
-pnpm run build
+npm install
+npm run build
 cd /tmp/garasje-icp-initial
 
 Sjekk:
