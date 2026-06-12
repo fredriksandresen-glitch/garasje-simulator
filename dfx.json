@@ -1,0 +1,14 @@
+{
+  "canisters": {
+    "frontend": {
+      "type": "assets",
+      "source": ["src/frontend/dist"]
+    }
+  },
+  "defaults": {
+    "build": {
+      "packtool": ""
+    }
+  },
+  "version": 1
+}
