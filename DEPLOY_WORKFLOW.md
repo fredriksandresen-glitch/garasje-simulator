@@ -29,7 +29,7 @@ ICP backend canister: ikke i bruk ennå
 Live ICP URL:
 Default branch: main
 Frontend path: src/frontend
-Build command: pnpm run build
+Build command: npm run build
 Dist folder: src/frontend/dist
 ```
 
@@ -68,8 +68,8 @@ git checkout <BRANCH_NAME>
 git log -1 --oneline
 
 cd src/frontend
-pnpm install
-pnpm run build
+npm install
+npm run build
 cd /tmp/garasje-icp-deploy
 
 cat > canister_ids.json <<'EOF'
