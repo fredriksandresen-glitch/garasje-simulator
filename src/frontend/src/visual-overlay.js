@@ -1,17 +1,238 @@
-const WASTE_VIZ_CONTAINERS={iso20:{label:'20 ISO',length:6.06,width:2.44,height:2.4,usableLength:5.9,usableWidth:2.35},iso10:{label:'10 ISO',length:2.99,width:2.44,height:2.4,usableLength:2.78,usableWidth:2.35},iso10hh:{label:'10 HH',length:2.99,width:2.44,height:.99,usableLength:2.78,usableWidth:2.35}};
-const WASTE_VIZ_LOADS={drum:{label:'Tønner',size:{length:.61,width:.61},className:'drum'},steel:{label:'Stålkasse',size:{length:2.8,width:1.35},className:'steel'},kokille:{label:'Kokille',size:{length:1.2,width:.8},className:'kokille'}};
-let wasteVizTimer=0;
-function wasteVizNumber(text,fallback=0){const match=String(text||'').replace(/\s/g,'').replace(',','.').match(/-?\d+(\.\d+)?/);return match?Number(match[0]):fallback}
-function wasteVizValue(label,fallback){const field=[...document.querySelectorAll('.field')].find((item)=>item.textContent.toLowerCase().includes(label.toLowerCase()));const input=field&&field.querySelector('input');return input?wasteVizNumber(input.value,fallback):fallback}
-function wasteVizContainer(){const active=[...document.querySelectorAll('.segments')][0]?.querySelector('.active');const text=(active?.textContent||'20').toLowerCase();if(text.includes('half'))return WASTE_VIZ_CONTAINERS.iso10hh;if(text.includes('10'))return WASTE_VIZ_CONTAINERS.iso10;return WASTE_VIZ_CONTAINERS.iso20}
-function wasteVizLoadKind(text){const value=text.toLowerCase();if(value.includes('kokille'))return'kokille';if(value.includes('stål')||value.includes('stal'))return'steel';return'drum'}
-function wasteVizParseCount(text){if(String(text).includes('∞'))return 0;const need=String(text).match(/behov\s+([\d\s,.]+)\s*cont/i);if(need)return Math.max(0,Math.round(wasteVizNumber(need[1],0)));const all=[...String(text).matchAll(/([\d\s,.]+)\s*cont/gi)];return all.length?Math.max(0,Math.round(wasteVizNumber(all[all.length-1][1],0))):0}
-function wasteVizScenarioRows(){const rows=[...document.querySelectorAll('.table-row:not(.table-head)')];return rows.map((row)=>{const text=row.textContent||'';const kind=wasteVizLoadKind(text);const per=Number((text.match(/(\d+)\s*stk/)||[])[1]||0);const count=wasteVizParseCount(text);const selected=row.classList.contains('selected-row')||text.includes('med i scenario')||kind!=='steel';return{kind,per,count,selected,score:0,text}}).filter((row)=>row.selected&&row.per>0&&row.count>0)}
-function wasteVizQueue(limit){const rows=wasteVizScenarioRows();const total=rows.reduce((sum,row)=>sum+row.count,0);if(!total)return[];const queue=[];for(let i=0;i<limit;i+=1){let best=null;for(const row of rows){if(row.count<=0)continue;row.score+=row.count/total;if(!best||row.score>best.score)best=row}if(!best)break;queue.push(best);best.score-=1;best.count-=1}return queue}
-function wasteVizRoomMeta(room){const header=room.querySelector('.plan-room-header span')?.textContent||'';const footer=room.querySelector('.plan-room-footer')?.textContent||'';const dims=header.match(/([\d,.]+)\s*x\s*([\d,.]+)/);const grid=footer.match(/(\d+)\s*rader\s*x\s*(\d+)/i);const slots=wasteVizNumber(footer,0);return{width:dims?wasteVizNumber(dims[1],16.85):16.85,length:dims?wasteVizNumber(dims[2],24):24,rows:grid?Number(grid[1]):1,cols:grid?Number(grid[2]):1,slots}}
-function wasteVizPayload(load,container,index){const info=WASTE_VIZ_LOADS[load.kind]||WASTE_VIZ_LOADS.drum;const maxCols=Math.max(1,Math.floor(container.usableWidth/Math.min(info.size.width,container.usableWidth)));const cols=Math.max(1,Math.min(load.per,maxCols));const rows=Math.max(1,Math.ceil(load.per/cols));const cellW=92/cols;const cellH=80/rows;const physicalW=(Math.min(info.size.width,container.usableWidth)/container.usableWidth)*86;const physicalH=(Math.min(info.size.length,container.usableLength)/container.usableLength)*76;const width=Math.max(load.kind==='drum'?8:14,Math.min(physicalW,cellW*.72));const height=Math.max(load.kind==='drum'?8:12,Math.min(physicalH,cellH*.68));const col=index%cols;const row=Math.floor(index/cols);const left=4+col*cellW+(cellW-width)/2;const top=13+row*cellH+(cellH-height)/2;const symbol=document.createElement('span');symbol.className='waste-viz-payload '+info.className;symbol.style.left=left+'%';symbol.style.top=top+'%';symbol.style.width=width+'%';symbol.style.height=height+'%';return symbol}
-function wasteVizDraw(){const canvas=document.querySelector('.plan-canvas');if(!canvas)return;const container=wasteVizContainer();const wall=wasteVizValue('Veggklarering',.5);const aisle=wasteVizValue('Gang/luft',.8);const door=wasteVizValue('Avstand til personsluser',.9);const height=wasteVizValue('Fri stablehøyde',6.3);const maxLevels=wasteVizValue('Maks nivåer',4);const levels=Math.max(1,Math.min(maxLevels,Math.floor(height/container.height)));const rooms=[...document.querySelectorAll('.plan-room')];const totalFloor=rooms.reduce((sum,room)=>sum+wasteVizRoomMeta(room).slots,0);const queue=wasteVizQueue(totalFloor*levels);let offset=0;rooms.forEach((room)=>{room.querySelectorAll('.waste-viz-layer,.waste-viz-clearance').forEach((node)=>node.remove());const meta=wasteVizRoomMeta(room);const clear=document.createElement('div');clear.className='waste-viz-clearance';clear.style.left=wall/meta.width*100+'%';clear.style.right=wall/meta.width*100+'%';clear.style.top=door/meta.length*100+'%';clear.style.bottom=wall/meta.length*100+'%';room.appendChild(clear);const layer=document.createElement('div');layer.className='waste-viz-layer';room.appendChild(layer);let made=0;for(let col=0;col<meta.cols;col+=1){for(let row=0;row<meta.rows;row+=1){if(made>=meta.slots)break;const stack=queue.slice(offset,offset+levels);offset+=levels;const load=stack[0];const x=wall+row*(container.width+aisle);const y=wall+col*(container.length+aisle);const top=Math.max(0,meta.length-y-container.length);const box=document.createElement('div');const kind=load?load.kind:'empty';box.className='waste-viz-container '+kind+' '+(container.height<1.2?'half':container.length<4?'short':'long');box.style.left=x/meta.width*100+'%';box.style.top=top/meta.length*100+'%';box.style.width=container.width/meta.width*100+'%';box.style.height=container.length/meta.length*100+'%';box.title=load?container.label+': '+load.per+' '+WASTE_VIZ_LOADS[kind].label.toLowerCase()+' per container, '+stack.length+' nivå(er)':container.label+': ledig plass';box.innerHTML='<div class="waste-viz-label"><span>'+container.label+'</span>'+(stack.length>1?'<strong>x'+stack.length+'</strong>':'')+'</div>';if(load){const payload=document.createElement('div');payload.className='waste-viz-payload-layer';for(let i=0;i<Math.min(load.per,24);i+=1)payload.appendChild(wasteVizPayload(load,container,i));box.appendChild(payload)}else{const empty=document.createElement('span');empty.className='waste-viz-empty';empty.textContent='ledig';box.appendChild(empty)}layer.appendChild(box);made+=1}}})}
-function wasteVizSchedule(){clearTimeout(wasteVizTimer);wasteVizTimer=setTimeout(wasteVizDraw,80)}
-function wasteVizStyle(){if(document.getElementById('waste-viz-style'))return;const style=document.createElement('style');style.id='waste-viz-style';style.textContent=`.storage-zone{display:none!important}.waste-viz-layer{position:absolute;inset:0;z-index:2;pointer-events:none}.waste-viz-clearance{position:absolute;z-index:1;border:1px dashed rgba(40,107,82,.38);background:rgba(255,255,255,.22);pointer-events:none}.waste-viz-container{position:absolute;min-width:15px;min-height:18px;border:1px solid #46554c;border-radius:3px;background:#e3e8e2;box-shadow:inset 0 0 0 2px rgba(255,255,255,.55),0 2px 5px rgba(24,33,29,.16);overflow:hidden}.waste-viz-container.short{border-color:#426456;background:#e6eee9}.waste-viz-container.half{border-color:#77633b;background:repeating-linear-gradient(135deg,#efe8d6 0 6px,#e4d8bd 6px 12px)}.waste-viz-container.empty{opacity:.34;background:rgba(255,255,255,.7)}.waste-viz-container.drum{background:#edf4ee}.waste-viz-container.steel{background:#edf3fb}.waste-viz-container.kokille{background:#eef7ee}.waste-viz-label{position:absolute;inset:2px 3px auto 3px;z-index:3;display:flex;justify-content:space-between;gap:2px;color:#16231d;font-size:clamp(.42rem,.62vw,.64rem);font-weight:900;line-height:1;text-transform:uppercase}.waste-viz-label strong{border-radius:999px;background:rgba(255,255,255,.76);padding:1px 3px;font-size:.58em}.waste-viz-payload-layer{position:absolute;inset:14% 5% 7%}.waste-viz-payload{position:absolute;display:block;border:1px solid rgba(20,29,24,.34);box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}.waste-viz-payload.drum{border-radius:50%;background:#d9a441}.waste-viz-payload.steel{border-radius:2px;background:#4f83bd}.waste-viz-payload.kokille{border-radius:3px;background:#69a86b}.waste-viz-empty{position:absolute;inset:auto 3px 3px;color:#6e7870;font-size:.52rem;font-weight:800;text-align:center}.legend-container{background:#e3e8e2}.legend-drum{background:#d9a441;border-radius:999px}.legend-steel{background:#4f83bd}.legend-kokille{background:#69a86b}`;document.head.appendChild(style)}
-function wasteVizBoot(){wasteVizStyle();wasteVizSchedule();new MutationObserver(wasteVizSchedule).observe(document.body,{childList:true,subtree:true,characterData:true});document.addEventListener('input',wasteVizSchedule,true);document.addEventListener('click',wasteVizSchedule,true)}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',wasteVizBoot);else wasteVizBoot();
+const WASTE_VIZ_CONTAINERS = {
+  iso20: { label: "20 ISO", length: 6.06, width: 2.44, height: 2.4, usableLength: 5.9, usableWidth: 2.35 },
+  iso10: { label: "10 ISO", length: 2.99, width: 2.44, height: 2.4, usableLength: 2.78, usableWidth: 2.35 },
+  iso10hh: { label: "10 HH", length: 2.99, width: 2.44, height: 0.99, usableLength: 2.78, usableWidth: 2.35 }
+};
+
+const WASTE_VIZ_LOADS = {
+  drum: { label: "Tønner", size: { length: 0.61, width: 0.61 }, className: "drum" },
+  steel: { label: "Stålkasse", size: { length: 2.8, width: 1.35 }, className: "steel" },
+  kokille: { label: "Kokille", size: { length: 1.2, width: 0.8 }, className: "kokille" }
+};
+
+let wasteVizTimer = 0;
+
+function wasteVizNumber(text, fallback = 0) {
+  const match = String(text || "").replace(/\s/g, "").replace(",", ".").match(/-?\d+(\.\d+)?/);
+  return match ? Number(match[0]) : fallback;
+}
+
+function wasteVizValue(label, fallback) {
+  const field = [...document.querySelectorAll(".field")].find((item) => item.textContent.toLowerCase().includes(label.toLowerCase()));
+  const input = field && field.querySelector("input");
+  return input ? wasteVizNumber(input.value, fallback) : fallback;
+}
+
+function wasteVizContainer() {
+  const active = [...document.querySelectorAll(".segments")][0]?.querySelector(".active");
+  const text = (active?.textContent || "20").toLowerCase();
+  if (text.includes("half")) return WASTE_VIZ_CONTAINERS.iso10hh;
+  if (text.includes("10")) return WASTE_VIZ_CONTAINERS.iso10;
+  return WASTE_VIZ_CONTAINERS.iso20;
+}
+
+function wasteVizLoadKind(text) {
+  const value = text.toLowerCase();
+  if (value.includes("kokille")) return "kokille";
+  if (value.includes("stål") || value.includes("stal")) return "steel";
+  return "drum";
+}
+
+function wasteVizParseCount(text) {
+  if (String(text).includes("∞")) return 0;
+  const need = String(text).match(/behov\s+([\d\s,.]+)\s*cont/i);
+  if (need) return Math.max(0, Math.round(wasteVizNumber(need[1], 0)));
+  const all = [...String(text).matchAll(/([\d\s,.]+)\s*cont/gi)];
+  return all.length ? Math.max(0, Math.round(wasteVizNumber(all[all.length - 1][1], 0))) : 0;
+}
+
+function wasteVizScenarioRows() {
+  const rows = [...document.querySelectorAll(".table-row:not(.table-head)")];
+  return rows.map((row) => {
+    const text = row.textContent || "";
+    const kind = wasteVizLoadKind(text);
+    const per = Number((text.match(/(\d+)\s*stk/) || [])[1] || 0);
+    const count = wasteVizParseCount(text);
+    const selected = row.classList.contains("selected-row") || text.includes("med i scenario") || kind !== "steel";
+    return { kind, per, count, selected, score: 0, text };
+  }).filter((row) => row.selected && row.per > 0 && row.count > 0);
+}
+
+function wasteVizQueue(limit) {
+  const rows = wasteVizScenarioRows();
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
+  if (!total) return [];
+
+  const queue = [];
+  for (let index = 0; index < limit; index += 1) {
+    let best = null;
+    for (const row of rows) {
+      if (row.count <= 0) continue;
+      row.score += row.count / total;
+      if (!best || row.score > best.score) best = row;
+    }
+    if (!best) break;
+    queue.push(best);
+    best.score -= 1;
+    best.count -= 1;
+  }
+  return queue;
+}
+
+function wasteVizRoomMeta(room) {
+  const header = room.querySelector(".plan-room-header span")?.textContent || "";
+  const footer = room.querySelector(".plan-room-footer")?.textContent || "";
+  const dims = header.match(/([\d,.]+)\s*x\s*([\d,.]+)/);
+  const grid = footer.match(/(\d+)\s*rader\s*x\s*(\d+)/i);
+  const slots = wasteVizNumber(footer, 0);
+  return {
+    width: dims ? wasteVizNumber(dims[1], 16.85) : 16.85,
+    length: dims ? wasteVizNumber(dims[2], 24) : 24,
+    rows: grid ? Number(grid[1]) : 1,
+    cols: grid ? Number(grid[2]) : 1,
+    slots
+  };
+}
+
+function wasteVizPayload(load, container, index) {
+  const info = WASTE_VIZ_LOADS[load.kind] || WASTE_VIZ_LOADS.drum;
+  const itemWidth = Math.min(info.size.width, container.usableWidth);
+  const itemLength = Math.min(info.size.length, container.usableLength);
+  const cols = Math.max(1, Math.min(load.per, Math.floor(container.usableWidth / itemWidth)));
+  const rows = Math.max(1, Math.ceil(load.per / cols));
+  const gapX = Math.max(0, (container.usableWidth - cols * itemWidth) / (cols + 1));
+  const gapY = Math.max(0, (container.usableLength - rows * itemLength) / (rows + 1));
+  const col = index % cols;
+  const row = Math.floor(index / cols);
+  const leftMeters = gapX + col * (itemWidth + gapX);
+  const topMeters = gapY + row * (itemLength + gapY);
+
+  const symbol = document.createElement("span");
+  symbol.className = "waste-viz-payload " + info.className;
+  symbol.style.left = (leftMeters / container.usableWidth) * 100 + "%";
+  symbol.style.top = (topMeters / container.usableLength) * 100 + "%";
+  symbol.style.width = (itemWidth / container.usableWidth) * 100 + "%";
+  symbol.style.height = (itemLength / container.usableLength) * 100 + "%";
+  return symbol;
+}
+
+function wasteVizFriendlyImpossibleText() {
+  const impossibleRows = [...document.querySelectorAll(".table-row:not(.table-head)")].filter((row) => {
+    const text = row.textContent || "";
+    return row.classList.contains("selected-row") && (text.includes("∞") || text.includes("0 stk"));
+  });
+
+  if (impossibleRows.length) {
+    const names = impossibleRows.map((row) => row.querySelector("strong")?.textContent?.trim()).filter(Boolean).join(", ");
+    const text = names
+      ? `${names} passer ikke med valgt container eller gir 0 stk per container. Bytt container, stålkassevariant eller grenseverdier.`
+      : "Valgt last passer ikke med valgt container eller gir 0 stk per container. Bytt container, lastvariant eller grenseverdier.";
+    document.querySelectorAll(".warning span").forEach((span) => {
+      if (span.textContent.includes("∞")) span.textContent = text;
+    });
+    return;
+  }
+
+  document.querySelectorAll(".warning span").forEach((span) => {
+    if (span.textContent.includes("∞")) {
+      span.textContent = "Valgt scenario kan ikke beregnes fordi en lasttype gir 0 stk per container. Se tabellen for hvilken kombinasjon som stopper.";
+    }
+  });
+}
+
+function wasteVizDraw() {
+  const canvas = document.querySelector(".plan-canvas");
+  wasteVizFriendlyImpossibleText();
+  if (!canvas) return;
+
+  const container = wasteVizContainer();
+  const wall = wasteVizValue("Veggklarering", 0.5);
+  const aisle = wasteVizValue("Gang/luft", 0.8);
+  const door = wasteVizValue("Avstand til personsluser", 0.9);
+  const height = wasteVizValue("Fri stablehøyde", 6.3);
+  const maxLevels = wasteVizValue("Maks nivåer", 4);
+  const levels = Math.max(1, Math.min(maxLevels, Math.floor(height / container.height)));
+  const rooms = [...document.querySelectorAll(".plan-room")];
+  const totalFloor = rooms.reduce((sum, room) => sum + wasteVizRoomMeta(room).slots, 0);
+  const queue = wasteVizQueue(totalFloor * levels);
+  let offset = 0;
+
+  rooms.forEach((room) => {
+    room.querySelectorAll(".waste-viz-layer,.waste-viz-clearance").forEach((node) => node.remove());
+    const meta = wasteVizRoomMeta(room);
+    const clear = document.createElement("div");
+    clear.className = "waste-viz-clearance";
+    clear.style.left = (wall / meta.width) * 100 + "%";
+    clear.style.right = (wall / meta.width) * 100 + "%";
+    clear.style.top = (door / meta.length) * 100 + "%";
+    clear.style.bottom = (wall / meta.length) * 100 + "%";
+    room.appendChild(clear);
+
+    const layer = document.createElement("div");
+    layer.className = "waste-viz-layer";
+    room.appendChild(layer);
+
+    let made = 0;
+    for (let col = 0; col < meta.cols; col += 1) {
+      for (let row = 0; row < meta.rows; row += 1) {
+        if (made >= meta.slots) break;
+        const stack = queue.slice(offset, offset + levels);
+        offset += levels;
+        const load = stack[0];
+        const x = wall + row * (container.width + aisle);
+        const y = wall + col * (container.length + aisle);
+        const top = Math.max(0, meta.length - y - container.length);
+        const box = document.createElement("div");
+        const kind = load ? load.kind : "empty";
+        box.className = "waste-viz-container " + kind + " " + (container.height < 1.2 ? "half" : container.length < 4 ? "short" : "long");
+        box.style.left = (x / meta.width) * 100 + "%";
+        box.style.top = (top / meta.length) * 100 + "%";
+        box.style.width = (container.width / meta.width) * 100 + "%";
+        box.style.height = (container.length / meta.length) * 100 + "%";
+        box.title = load
+          ? `${container.label}: ${load.per} ${WASTE_VIZ_LOADS[kind].label.toLowerCase()} per container, ${stack.length} nivå(er)`
+          : `${container.label}: ledig plass`;
+        box.innerHTML = `<div class="waste-viz-label"><span>${container.label}</span>${stack.length > 1 ? `<strong>x${stack.length}</strong>` : ""}</div>`;
+
+        if (load) {
+          const payload = document.createElement("div");
+          payload.className = "waste-viz-payload-layer";
+          for (let index = 0; index < Math.min(load.per, 24); index += 1) payload.appendChild(wasteVizPayload(load, container, index));
+          box.appendChild(payload);
+        } else {
+          const empty = document.createElement("span");
+          empty.className = "waste-viz-empty";
+          empty.textContent = "ledig";
+          box.appendChild(empty);
+        }
+
+        layer.appendChild(box);
+        made += 1;
+      }
+    }
+  });
+}
+
+function wasteVizSchedule() {
+  clearTimeout(wasteVizTimer);
+  wasteVizTimer = setTimeout(wasteVizDraw, 80);
+}
+
+function wasteVizStyle() {
+  if (document.getElementById("waste-viz-style")) return;
+  const style = document.createElement("style");
+  style.id = "waste-viz-style";
+  style.textContent = `.storage-zone{display:none!important}.waste-viz-layer{position:absolute;inset:0;z-index:2;pointer-events:none}.waste-viz-clearance{position:absolute;z-index:1;border:1px dashed rgba(40,107,82,.38);background:rgba(255,255,255,.22);pointer-events:none}.waste-viz-container{position:absolute;min-width:15px;min-height:18px;border:1px solid #46554c;border-radius:3px;background:#e3e8e2;box-shadow:inset 0 0 0 2px rgba(255,255,255,.55),0 2px 5px rgba(24,33,29,.16);overflow:hidden}.waste-viz-container.short{border-color:#426456;background:#e6eee9}.waste-viz-container.half{border-color:#77633b;background:repeating-linear-gradient(135deg,#efe8d6 0 6px,#e4d8bd 6px 12px)}.waste-viz-container.empty{opacity:.34;background:rgba(255,255,255,.7)}.waste-viz-container.drum{background:#edf4ee}.waste-viz-container.steel{background:#edf3fb}.waste-viz-container.kokille{background:#eef7ee}.waste-viz-label{position:absolute;inset:2px 3px auto 3px;z-index:3;display:flex;justify-content:space-between;gap:2px;color:#16231d;font-size:clamp(.42rem,.62vw,.64rem);font-weight:900;line-height:1;text-transform:uppercase}.waste-viz-label strong{border-radius:999px;background:rgba(255,255,255,.76);padding:1px 3px;font-size:.58em}.waste-viz-payload-layer{position:absolute;inset:14% 5% 7%}.waste-viz-payload{position:absolute;display:block;border:1px solid rgba(20,29,24,.34);box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}.waste-viz-payload.drum{border-radius:50%;background:#d9a441}.waste-viz-payload.steel{border-radius:2px;background:#4f83bd}.waste-viz-payload.kokille{border-radius:3px;background:#69a86b}.waste-viz-empty{position:absolute;inset:auto 3px 3px;color:#6e7870;font-size:.52rem;font-weight:800;text-align:center}.legend-container{background:#e3e8e2}.legend-drum{background:#d9a441;border-radius:999px}.legend-steel{background:#4f83bd}.legend-kokille{background:#69a86b}`;
+  document.head.appendChild(style);
+}
+
+function wasteVizBoot() {
+  wasteVizStyle();
+  wasteVizSchedule();
+  new MutationObserver(wasteVizSchedule).observe(document.body, { childList: true, subtree: true, characterData: true });
+  document.addEventListener("input", wasteVizSchedule, true);
+  document.addEventListener("click", wasteVizSchedule, true);
+}
+
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wasteVizBoot);
+else wasteVizBoot();
