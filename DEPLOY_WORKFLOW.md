@@ -1,6 +1,6 @@
-# Garasje Simulator deploy-flyt
+# Lagerbygg III deploy-flyt
 
-Dette prosjektet skal bruke samme arbeidsflyt som Handball Tracker:
+Dette prosjektet bruker samme arbeidsflyt som Handball Tracker:
 
 1. Codex lager endringer på en egen GitHub-branch, vanligvis `codex/<kort-navn>`.
 2. Vercel bygger preview fra branchen.
@@ -11,37 +11,23 @@ Dette prosjektet skal bruke samme arbeidsflyt som Handball Tracker:
 ## Regler
 
 - Ikke deploy direkte til ICP fra Codex.
-- Ikke opprett ny ICP-canister når appen først har fått faste canistere.
+- Ikke opprett ny ICP-canister.
+- Bruk eksisterende frontend canister: `znz7v-gyaaa-aaaal-qxdtq-cai`.
 - Deploy til ICP skal kun gjøres etter at Vercel-preview er godkjent.
-- ICP-deploy skal bruke eksisterende canister-IDer.
 - Codex skal alltid oppgi branch-navn og verifiseringspunkter i meldingen til clawdbot.
 
 ## Prosjektverdier
 
-Fylles ut når repo, Vercel og ICP er klare:
-
 ```text
 GitHub repo: https://github.com/fredriksandresen-glitch/garasje-simulator.git
-Vercel project:
-Vercel preview deployments:
-ICP frontend canister:
-ICP backend canister: ikke i bruk ennå
-Live ICP URL:
+ICP frontend canister: znz7v-gyaaa-aaaal-qxdtq-cai
+Live ICP URL: https://znz7v-gyaaa-aaaal-qxdtq-cai.icp0.io/
 Default branch: main
 Frontend path: src/frontend
 Build command: npm run build
 Dist folder: src/frontend/dist
+Backend canister: ikke i bruk ennå
 ```
-
-## Standard Codex-flyt
-
-Når Fredrik ber om en endring:
-
-1. Lag eller bruk branch `codex/<endring>`.
-2. Gjør endringen i GitHub-repoet.
-3. Push branchen.
-4. Be Fredrik teste Vercel-preview.
-5. Når Fredrik godkjenner, lever en ferdig clawdbot-melding basert på malen under.
 
 ## Clawdbot-mal for ICP-deploy
 
@@ -50,7 +36,7 @@ Oppdater ICP-canisteren med siste GitHub-versjon.
 
 Viktig:
 - Ikke opprett ny canister.
-- Bruk eksisterende frontend canister: <FRONTEND_CANISTER_ID>
+- Bruk eksisterende frontend canister: znz7v-gyaaa-aaaal-qxdtq-cai
 - Repo: https://github.com/fredriksandresen-glitch/garasje-simulator.git
 - Branch: <BRANCH_NAME>
 - Gi statusoppdatering hvert 2. minutt hvis build/deploy tar tid.
@@ -60,22 +46,22 @@ Kjør:
 export PATH="$HOME/.local/share/dfx/bin:$PATH"
 export DFX_WARNING=-mainnet_plaintext_identity
 
-rm -rf /tmp/garasje-icp-deploy
-git clone https://github.com/fredriksandresen-glitch/garasje-simulator.git /tmp/garasje-icp-deploy
+rm -rf /tmp/lagerbygg-icp-deploy
+git clone https://github.com/fredriksandresen-glitch/garasje-simulator.git /tmp/lagerbygg-icp-deploy
 
-cd /tmp/garasje-icp-deploy
+cd /tmp/lagerbygg-icp-deploy
 git checkout <BRANCH_NAME>
 git log -1 --oneline
 
 cd src/frontend
 npm install
 npm run build
-cd /tmp/garasje-icp-deploy
+cd /tmp/lagerbygg-icp-deploy
 
 cat > canister_ids.json <<'EOF'
 {
   "frontend": {
-    "ic": "<FRONTEND_CANISTER_ID>"
+    "ic": "znz7v-gyaaa-aaaal-qxdtq-cai"
   }
 }
 EOF
@@ -90,10 +76,11 @@ dfx deploy --network ic frontend
 
 Etter deploy:
 echo "Deploy ferdig:"
-echo "<LIVE_ICP_URL>"
+echo "https://znz7v-gyaaa-aaaal-qxdtq-cai.icp0.io/"
 
 Verifiser i appen:
-1. <SJEKKPUNKT_1>
-2. <SJEKKPUNKT_2>
-3. <SJEKKPUNKT_3>
+1. Siden heter Lagerbygg III og ikke Garasje Simulator.
+2. Lager 1 og Lager 2 vises i plassmodellen.
+3. Slidere for høyde, containergrenser, scenario, vekt og dose endrer resultatene.
+4. Varsler vises ved brudd på vekt, dose eller kapasitet.
 ```
