@@ -28,7 +28,7 @@ function App() {
   const [doorClearance, setDoorClearance] = useState(0.9);
   const [aisleGap, setAisleGap] = useState(0.8);
   const [useLager2Extension, setUseLager2Extension] = useState(true);
-  const [subtractObstructions, setSubtractObstructions] = useState(true);
+  const [includeMarkedAreas, setIncludeMarkedAreas] = useState(false);
   const [containerType, setContainerType] = useState("iso20");
   const [containerGrossLimit, setContainerGrossLimit] = useState(24000);
   const [containerDoseLimit, setContainerDoseLimit] = useState(2);
@@ -38,6 +38,7 @@ function App() {
   const [years, setYears] = useState(19);
   const [drumShare, setDrumShare] = useState(68);
   const [steelShare, setSteelShare] = useState(31);
+  const [kokilleShare, setKokilleShare] = useState(1);
   const [drumWeight, setDrumWeight] = useState(330);
   const [steelWeight, setSteelWeight] = useState(3000);
   const [kokilleWeight, setKokilleWeight] = useState(1800);
@@ -59,7 +60,7 @@ function App() {
       const clearLength = Math.max(0, storageLength - doorClearance);
       const cols = Math.max(0, Math.floor(clearLength / footprint.length));
       const rows = Math.max(0, Math.floor(clearWidth / footprint.width));
-      const obstructionSlots = subtractObstructions ? Math.ceil(room.obstructionArea / (footprint.length * footprint.width)) : 0;
+      const obstructionSlots = includeMarkedAreas ? 0 : Math.ceil(room.obstructionArea / (footprint.length * footprint.width));
       const floorSlots = Math.max(0, cols * rows - obstructionSlots);
       return {
         ...room,
@@ -69,7 +70,7 @@ function App() {
         rows,
         floorSlots,
         totalSlots: floorSlots * levels,
-        effectiveArea: clearWidth * clearLength - (subtractObstructions ? room.obstructionArea : 0),
+        effectiveArea: clearWidth * clearLength - (includeMarkedAreas ? 0 : room.obstructionArea),
         leftPct: (room.x / planWidth) * 100,
         topPct: ((planLength - displayLength) / planLength) * 100,
         widthPct: (room.width / planWidth) * 100,
@@ -79,8 +80,8 @@ function App() {
 
     const totalContainerSlots = roomModels.reduce((sum, room) => sum + room.totalSlots, 0);
     const totalFootprintArea = roomModels.reduce((sum, room) => sum + room.effectiveArea, 0);
-    const kokilleShare = Math.max(0, 100 - drumShare - steelShare);
     const totalNeed = existingDrumEq + annualDrumEq * years;
+    const shareTotal = drumShare + steelShare + kokilleShare;
     const weights = { drum210: drumWeight, steel1: steelWeight, kokille: kokilleWeight };
     const doses = { drum210: drumDose, steel1: steelDose, kokille: kokilleDose };
     const shares = { drum210: drumShare / 100, steel1: steelShare / 100, kokille: kokilleShare / 100 };
@@ -100,10 +101,10 @@ function App() {
     });
 
     const requiredContainers = loadRows.reduce((sum, row) => sum + row.containersNeeded, 0);
-    return { container, levels, planWidth, planLength, roomModels, totalContainerSlots, totalFootprintArea, totalNeed, kokilleShare, loadRows, requiredContainers, mixedCoverage: totalContainerSlots / Math.max(1, requiredContainers) };
-  }, [heightLimit, stackLimit, wallClearance, doorClearance, aisleGap, useLager2Extension, subtractObstructions, containerType, containerGrossLimit, containerDoseLimit, trailerLimit, existingDrumEq, annualDrumEq, years, drumShare, steelShare, drumWeight, steelWeight, kokilleWeight, drumDose, steelDose, kokilleDose]);
+    return { container, levels, planWidth, planLength, roomModels, totalContainerSlots, totalFootprintArea, totalNeed, shareTotal, loadRows, requiredContainers, mixedCoverage: totalContainerSlots / Math.max(1, requiredContainers) };
+  }, [heightLimit, stackLimit, wallClearance, doorClearance, aisleGap, useLager2Extension, includeMarkedAreas, containerType, containerGrossLimit, containerDoseLimit, trailerLimit, existingDrumEq, annualDrumEq, years, drumShare, steelShare, kokilleShare, drumWeight, steelWeight, kokilleWeight, drumDose, steelDose, kokilleDose]);
 
-  const warnings = buildWarnings({ model, stackLimit, drumWeight, steelWeight, drumShare, steelShare });
+  const warnings = buildWarnings({ model, stackLimit, drumWeight, steelWeight });
 
   return (
     <main className="app-shell">
@@ -132,19 +133,23 @@ function App() {
             <Slider label="Gang/luft mellom containere" value={aisleGap} min={0.1} max={2.5} step={0.1} unit="m" onChange={setAisleGap} />
             <Slider label="Veggklarering" value={wallClearance} min={0} max={1.5} step={0.1} unit="m" onChange={setWallClearance} />
             <Toggle label="Ta med rosa felt i Lager 2" checked={useLager2Extension} onChange={setUseLager2Extension} />
-            <Toggle label="Trekk fra sluser/markerte felt" checked={subtractObstructions} onChange={setSubtractObstructions} />
+            <Toggle label="Ta med gule slusefelt som lagerareal" checked={includeMarkedAreas} onChange={setIncludeMarkedAreas} />
+
             <PanelTitle icon={<Shield />} title="Container og grenser" />
             <Segmented options={containerTypes} value={containerType} onChange={setContainerType} />
             <Slider label="Maks container bruttovekt" value={containerGrossLimit} min={3000} max={30000} step={500} unit="kg" onChange={setContainerGrossLimit} />
             <Slider label="Maks trailerlast" value={trailerLimit} min={8000} max={50000} step={1000} unit="kg" onChange={setTrailerLimit} />
             <Slider label="Maks dose per container" value={containerDoseLimit} min={0.2} max={10} step={0.1} unit="mSv/h" onChange={setContainerDoseLimit} />
+
             <PanelTitle icon={<Ruler />} title="Behovsscenario" />
             <Slider label="Eksisterende beholdning" value={existingDrumEq} min={0} max={1500} step={10} unit="drum eq." onChange={setExistingDrumEq} />
             <Slider label="Årlig tilvekst" value={annualDrumEq} min={50} max={300} step={5} unit="drum eq." onChange={setAnnualDrumEq} />
             <Slider label="År" value={years} min={5} max={25} step={1} unit="år" onChange={setYears} />
             <Slider label="Andel 210L" value={drumShare} min={0} max={100} step={1} unit="%" onChange={setDrumShare} />
             <Slider label="Andel stålkasser" value={steelShare} min={0} max={100} step={1} unit="%" onChange={setSteelShare} />
-            <div className="derived">Kokille-andel: {model.kokilleShare.toFixed(0)}%</div>
+            <Slider label="Andel kokiller" value={kokilleShare} min={0} max={100} step={1} unit="%" onChange={setKokilleShare} />
+            <div className={model.shareTotal === 100 ? "derived" : "derived warning-text"}>Sum andeler: {model.shareTotal.toFixed(0)}%</div>
+
             <PanelTitle icon={<Scale />} title="Lastdata" />
             <Slider label="Tønnevekt" value={drumWeight} min={50} max={700} step={5} unit="kg" onChange={setDrumWeight} />
             <Slider label="Stålkassevekt" value={steelWeight} min={500} max={4000} step={25} unit="kg" onChange={setSteelWeight} />
@@ -156,7 +161,7 @@ function App() {
 
           <section className="stage" aria-label="Lageroversikt">
             <div className="stage-header"><div><h2>Arkitektbasert plassmodell</h2><p>Felles målestokk: total bredde {model.planWidth.toFixed(2)} m, visningslengde {model.planLength.toFixed(2)} m, stablehøyde {formatNumber(model.levels * model.container.height)} m.</p></div><div className="capacity-pill">{formatNumber(model.totalFootprintArea)} m² effektivt areal</div></div>
-            <ArchitecturalPlan model={model} subtractObstructions={subtractObstructions} useLager2Extension={useLager2Extension} />
+            <ArchitecturalPlan model={model} includeMarkedAreas={includeMarkedAreas} useLager2Extension={useLager2Extension} />
             <div className="results-table">
               <div className="table-row table-head"><span>Lasttype</span><span>Per container</span><span>Behov</span><span>Kapasitet hvis alene</span><span>Last / trailer</span></div>
               {model.loadRows.map((row) => <div className="table-row" key={row.key}><span><strong>{row.label}</strong><small>{row.dimensions}</small></span><span>{row.perContainer} stk</span><span>{formatNumber(row.containersNeeded)} cont.</span><span>{formatNumber(row.capacityDrumEq)} drum eq.</span><span>{formatNumber(row.loadedWeight)} kg / {row.containersPerTrailer} cont.</span></div>)}
@@ -169,8 +174,10 @@ function App() {
   );
 }
 
-function ArchitecturalPlan({ model, subtractObstructions, useLager2Extension }) {
-  return <div className="plan-shell"><div className="plan-canvas" style={{ aspectRatio: `${model.planWidth} / ${model.planLength}` }}><div className="dimension dimension-width">16 850 mm + 500 mm + 16 850 mm</div><div className="dimension dimension-height">Lager 2: {model.planLength.toFixed(0)} m</div>{model.roomModels.map((room) => <PlanRoom key={room.key} room={room} model={model} />)}<div className="separator" style={{ left: `${(16.85 / model.planWidth) * 100}%`, width: `${(separatorWidth / model.planWidth) * 100}%` }} />{subtractObstructions && <div className="blocked blocked-l1">Personsluse 1<br />4.85 x 1.8 m</div>}{subtractObstructions && <div className="blocked blocked-l2">Forrom / sluse<br />5.15 x 6.99 m</div>}{useLager2Extension && <div className="extension-label">Rosa felt lagt til som tilgjengelig Lager 2-areal</div>}</div><div className="plan-legend"><span><i className="legend-storage" />Lagerareal</span><span><i className="legend-blocked" />Fratrekk/sluser</span><span><i className="legend-extension" />Utvidet areal</span></div></div>;
+function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
+  const markedClass = includeMarkedAreas ? "blocked included" : "blocked excluded";
+  const markedStatus = includeMarkedAreas ? "inkludert" : "fratrukket";
+  return <div className="plan-shell"><div className="plan-canvas" style={{ aspectRatio: `${model.planWidth} / ${model.planLength}` }}><div className="dimension dimension-width">16 850 mm + 500 mm + 16 850 mm</div><div className="dimension dimension-height">Lager 2: {model.planLength.toFixed(0)} m</div>{model.roomModels.map((room) => <PlanRoom key={room.key} room={room} model={model} />)}<div className="separator" style={{ left: `${(16.85 / model.planWidth) * 100}%`, width: `${(separatorWidth / model.planWidth) * 100}%` }} /><div className={`${markedClass} blocked-l1`}>Personsluse 1<br />4.85 x 1.8 m<br />{markedStatus}</div><div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 6.99 m<br />{markedStatus}</div>{useLager2Extension && <div className="extension-label">Rosa felt lagt til som tilgjengelig Lager 2-areal</div>}</div><div className="plan-legend"><span><i className="legend-storage" />Lagerareal</span><span><i className="legend-blocked" />Gule felt</span><span><i className="legend-extension" />Utvidet areal</span></div></div>;
 }
 
 function PlanRoom({ room, model }) {
@@ -178,14 +185,14 @@ function PlanRoom({ room, model }) {
   return <article className={`plan-room ${room.key}`} style={{ left: `${room.leftPct}%`, top: `${room.topPct}%`, width: `${room.widthPct}%`, height: `${room.heightPct}%` }}><div className="plan-room-header"><strong>{room.label}</strong><span>{room.width.toFixed(2)} x {room.displayLength.toFixed(2)} m</span></div><div className="storage-zone">{Array.from({ length: cells }).map((_, index) => <span key={index} className="container-cell">{model.levels}</span>)}</div><div className="plan-room-footer">{room.totalSlots} plasser · {room.rows} rader x {room.cols} lengder</div></article>;
 }
 
-function buildWarnings({ model, stackLimit, drumWeight, steelWeight, drumShare, steelShare }) {
+function buildWarnings({ model, stackLimit, drumWeight, steelWeight }) {
   const warnings = [];
   if (model.mixedCoverage < 1) warnings.push({ level: "critical", text: `Blandet scenario mangler ca. ${formatNumber(model.requiredContainers - model.totalContainerSlots)} containerplasser.` });
   if (stackLimit > 4) warnings.push({ level: "warn", text: "5 i høyden er kun testmodus. Nederste kasse/container må kontrolleres for trykkbelastning." });
   if (drumWeight > 330) warnings.push({ level: "critical", text: "Tønnevekt overstiger 330 kg UN-/spesifikasjonsgrensen fra rapporten." });
   if (steelWeight > 2500) warnings.push({ level: "warn", text: "Stålkassevekt overstiger 2500 kg truckgrense. Alternativ løftemetode må vurderes." });
   if (steelWeight > 3000) warnings.push({ level: "critical", text: "Stålkassevekt overstiger antatt 3000 kg stålkassegrense." });
-  if (drumShare + steelShare > 100) warnings.push({ level: "critical", text: "Andel 210L + stålkasser er over 100%. Reduser én av sliderne." });
+  if (model.shareTotal !== 100) warnings.push({ level: "warn", text: `Avfallsmiksen summerer til ${model.shareTotal.toFixed(0)}%. Juster 210L, stålkasser og kokiller til 100%.` });
   for (const row of model.loadRows) {
     if (row.perContainer === 0) warnings.push({ level: "critical", text: `${row.label} kan ikke pakkes med gjeldende vekt-/dosegrense.` });
     else if (row.packageDose > 2) warnings.push({ level: "warn", text: `${row.label} har dose over 2 mSv/h per kolli og bør håndteres særskilt.` });
