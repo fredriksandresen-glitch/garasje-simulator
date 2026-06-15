@@ -50,12 +50,20 @@ function lagerbyggFixes() {
           next = next.replace("  iso10hh: {\n", `${iso15Main}  iso10hh: {\n`);
         }
         next = next.replace(
+          "    const planLength = useLager2Extension ? 34 : 29;",
+          "    const planLength = 34;"
+        );
+        next = next.replace(
+          "      const displayLength = room.key === \"lager1\" ? room.baseLength : storageLength;",
+          "      const displayLength = room.key === \"lager1\" ? room.baseLength : room.extendedLength;"
+        );
+        next = next.replace(
           "      const packingLimited = fit.compatible ? packLimits[load.packKey] : 0;",
           "      const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];\n      const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], physicalPackLimit) : 0;"
         );
         next = next.replace(
           "        <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 6.99 m<br />{markedStatus}</div>\n        {useLager2Extension && <div className=\"extension-label\">Rosa felt lagt til som tilgjengelig Lager 2-areal</div>}",
-          "        <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 6.99 m<br />{markedStatus}</div>\n        {useLager2Extension && <div className=\"extension-label\">Rosa felt<br />17.15 x 5.00 m<br />inkludert</div>}"
+          "        <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 6.99 m<br />{markedStatus}</div>\n        <div className={useLager2Extension ? \"extension-label included\" : \"extension-label excluded\"}>Rosa felt<br />17.15 x 5.00 m<br />{useLager2Extension ? \"inkludert\" : \"fratrukket\"}</div>"
         );
         next = next.replace(/function getFit\(container, size\) \{[\s\S]*?\n\}\n\nfunction getLimitingConstraint/, `${fitHelpers}\nfunction getLimitingConstraint`);
         return next;
