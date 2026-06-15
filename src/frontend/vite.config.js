@@ -51,7 +51,7 @@ function lagerbyggFixes() {
         }
         next = next.replace(
           "      const packingLimited = fit.compatible ? packLimits[load.packKey] : 0;",
-          "      const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], fit.physicalCount) : 0;"
+          "      const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];\n      const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], physicalPackLimit) : 0;"
         );
         next = next.replace(
           "        <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 6.99 m<br />{markedStatus}</div>\n        {useLager2Extension && <div className=\"extension-label\">Rosa felt lagt til som tilgjengelig Lager 2-areal</div>}",
