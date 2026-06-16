@@ -151,7 +151,7 @@ const containerTypes = {
 const separatorWidth = 0.5;
 const rooms = [
   { key: "lager1", label: "Lager 1", x: 0, width: 16.85, baseLength: 24.115, usableLength: 22.015, obstructionArea: 4.85 * 1.8 },
-  { key: "lager2", label: "Lager 2", x: 16.85 + separatorWidth, width: 16.85, usableLength: 29, extendedLength: 34, obstructionArea: 5.15 * 6.985 }
+  { key: "lager2", label: "Lager 2", x: 16.85 + separatorWidth, width: 16.85, usableLength: 29, extendedLength: 34, obstructionArea: 5.15 * 11.985 }
 ];
 
 function App() {
@@ -189,11 +189,11 @@ function App() {
     const maxLevelsForHeight = Math.max(1, Math.floor(heightLimit / container.height));
     const levels = Math.max(1, Math.min(stackLimit, maxLevelsForHeight));
     const planWidth = 16.85 * 2 + separatorWidth;
-    const planLength = useLager2Extension ? 34 : 29;
+    const planLength = 34;
 
     const roomModels = rooms.map((room) => {
       const storageLength = room.key === "lager2" && useLager2Extension ? room.extendedLength : room.usableLength;
-      const displayLength = room.key === "lager1" ? room.baseLength : storageLength;
+      const displayLength = room.key === "lager1" ? room.baseLength : room.extendedLength;
       const clearWidth = Math.max(0, room.width - wallClearance * 2);
       const clearLength = Math.max(0, storageLength - doorClearance);
       const cols = Math.max(0, Math.floor(clearLength / footprint.length));
@@ -230,7 +230,8 @@ function App() {
       const packageWeight = weights[key];
       const packageDose = doses[key];
       const fit = getFit(container, load.size);
-      const packingLimited = fit.compatible ? packLimits[load.packKey] : 0;
+      const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];
+      const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], physicalPackLimit) : 0;
       const weightLimited = Math.max(0, Math.floor((containerGrossLimit - container.tare) / Math.max(1, packageWeight)));
       const doseLimited = Math.max(0, Math.floor(containerDoseLimit / Math.max(0.01, packageDose)));
       const perContainer = Math.max(0, Math.min(packingLimited, weightLimited, doseLimited));
@@ -470,7 +471,9 @@ function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
         <div className="separator" style={{ left: `${(16.85 / model.planWidth) * 100}%`, width: `${(separatorWidth / model.planWidth) * 100}%` }} />
         <div className={`${markedClass} blocked-l1`}>Personsluse 1<br />4.85 x 1.8 m<br />{markedStatus}</div>
         <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 11.99 m<br />{markedStatus}</div>
-        {useLager2Extension && <div className="extension-label">Rosa felt lagt til som tilgjengelig Lager 2-areal</div>}
+        <div className={useLager2Extension ? "extension-label included" : "extension-label excluded"}>
+          Rosa felt<br />17.15 x 5.00 m<br />{useLager2Extension ? "inkludert" : "fratrukket"}
+        </div>
       </div>
       <div className="plan-legend">
         <span><i className="legend-storage" />Lagerareal</span>
@@ -554,16 +557,36 @@ function ConstraintPanel({ model }) {
   );
 }
 
+function getFootprintFit(container, size) {
+  const orientations = [
+    { length: size.length, width: size.width, orientation: "straight" },
+    { length: size.width, width: size.length, orientation: "rotated" }
+  ];
+
+  return orientations.reduce((best, orientation) => {
+    const cols = Math.floor(container.usableWidth / orientation.width);
+    const rows = Math.floor(container.usableLength / orientation.length);
+    const count = Math.max(0, cols * rows);
+    return count > best.count ? { ...orientation, cols, rows, count } : best;
+  }, { length: size.length, width: size.width, orientation: "straight", cols: 0, rows: 0, count: 0 });
+}
+
 function getFit(container, size) {
   const uprightFits = size.height <= container.usableHeight;
-  const straightFits = size.length <= container.usableLength && size.width <= container.usableWidth;
-  const rotatedFits = size.width <= container.usableLength && size.length <= container.usableWidth;
-  const footprintFits = straightFits || rotatedFits;
+  const footprint = getFootprintFit(container, size);
 
-  if (uprightFits && footprintFits) return { compatible: true, orientation: straightFits ? "straight" : "rotated", reason: "Mål innenfor nyttig innvendig volum" };
-  if (!uprightFits && !footprintFits) return { compatible: false, reason: "For høy og for stort fotavtrykk" };
-  if (!uprightFits) return { compatible: false, reason: "For høy for valgt container" };
-  return { compatible: false, reason: "Fotavtrykk passer ikke i valgt container" };
+  if (uprightFits && footprint.count > 0) {
+    return {
+      compatible: true,
+      physicalCount: footprint.count,
+      orientation: footprint.orientation,
+      footprint,
+      reason: "Mål innenfor nyttig innvendig volum"
+    };
+  }
+  if (!uprightFits && footprint.count === 0) return { compatible: false, physicalCount: 0, footprint, reason: "For høy og for stort fotavtrykk" };
+  if (!uprightFits) return { compatible: false, physicalCount: 0, footprint, reason: "For høy for valgt container" };
+  return { compatible: false, physicalCount: 0, footprint, reason: "Fotavtrykk passer ikke i valgt container" };
 }
 
 function buildContainerQueue(scenarioRows, totalContainerSlots) {
