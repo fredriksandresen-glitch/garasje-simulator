@@ -76,6 +76,14 @@ function lagerbyggFixes() {
           /(<Slider label="Fri stablehøyde"[^>]*max=\{)7\.5(\}[^>]*>)/,
           "$110$2"
         );
+        next = next.replace(
+          "  const warnings = buildWarnings({ model, stackLimit, drumWeight, steelWeight });",
+          "  const warnings = buildWarnings({ model, stackLimit, drumWeight, steelWeight });\n  const regularStackCount = Math.max(1, Math.floor(heightLimit / 2.4));\n  const halfHeightStackCount = Math.max(1, Math.floor(heightLimit / 0.99));"
+        );
+        next = next.replace(
+          "            <Slider label=\"Fri stablehøyde\" value={heightLimit} min={4.5} max={10} step={0.1} unit=\"m\" onChange={setHeightLimit} />",
+          "            <Slider label=\"Fri stablehøyde\" value={heightLimit} min={4.5} max={10} step={0.1} unit=\"m\" onChange={setHeightLimit} />\n            <div className=\"container-note\">Ved {formatNumber(heightLimit)} m fri høyde: {regularStackCount} vanlige ISO-containere eller {halfHeightStackCount} half-height-containere i høyden.</div>"
+        );
         next = next.replaceAll("5.15 x 6.99 m", "5.15 x 11.99 m");
         next = next.replace(
           "      const packingLimited = fit.compatible ? packLimits[load.packKey] : 0;",
