@@ -72,17 +72,18 @@ function lagerbyggFixes() {
           "      const displayLength = room.key === \"lager1\" ? room.baseLength : storageLength;",
           "      const displayLength = room.key === \"lager1\" ? room.baseLength : room.extendedLength;"
         );
-        next = next.replace(
-          /(<Slider label="Fri stablehøyde"[^>]*max=\{)7\.5(\}[^>]*>)/,
-          "$110$2"
-        );
+        next = next.replaceAll("max={7.5}", "max={10}");
         next = next.replace(
           "  const warnings = buildWarnings({ model, stackLimit, drumWeight, steelWeight });",
-          "  const warnings = buildWarnings({ model, stackLimit, drumWeight, steelWeight });\n  const regularStackCount = Math.max(1, Math.floor(heightLimit / 2.4));\n  const halfHeightStackCount = Math.max(1, Math.floor(heightLimit / 0.99));"
+          "  const warnings = buildWarnings({ model, stackLimit, drumWeight, steelWeight });\n  const activeContainer = containerTypes[containerType];\n  const maxStackLevel = Math.max(1, Math.floor(heightLimit / activeContainer.height));\n  const regularStackCount = Math.max(1, Math.floor(heightLimit / 2.4));\n  const halfHeightStackCount = Math.max(1, Math.floor(heightLimit / 0.99));\n  const clampedStackLimit = Math.min(stackLimit, maxStackLevel);"
         );
         next = next.replace(
           "            <Slider label=\"Fri stablehøyde\" value={heightLimit} min={4.5} max={10} step={0.1} unit=\"m\" onChange={setHeightLimit} />",
           "            <Slider label=\"Fri stablehøyde\" value={heightLimit} min={4.5} max={10} step={0.1} unit=\"m\" onChange={setHeightLimit} />\n            <div className=\"container-note\">Ved {formatNumber(heightLimit)} m fri høyde: {regularStackCount} vanlige ISO-containere eller {halfHeightStackCount} half-height-containere i høyden.</div>"
+        );
+        next = next.replace(
+          "            <Slider label=\"Maks nivåer\" value={stackLimit} min={1} max={5} step={1} unit=\"stk\" onChange={setStackLimit} />",
+          "            <Slider label=\"Maks nivåer\" value={clampedStackLimit} min={1} max={maxStackLevel} step={1} unit=\"stk\" onChange={setStackLimit} />"
         );
         next = next.replaceAll("5.15 x 6.99 m", "5.15 x 11.99 m");
         next = next.replace(
