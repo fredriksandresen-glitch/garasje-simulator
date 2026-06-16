@@ -61,8 +61,8 @@ function lagerbyggFixes() {
           next = next.replace("  iso10hh: {\n", `${iso15Main}  iso10hh: {\n`);
         }
         next = next.replace(
-          "  { key: \"lager2\", label: \"Lager 2\", x: 16.85 + separatorWidth, width: 16.85, usableLength: 29, extendedLength: 34, obstructionArea: 5.15 * 6.985 }",
-          "  { key: \"lager2\", label: \"Lager 2\", x: 16.85 + separatorWidth, width: 16.85, usableLength: 29, extendedLength: 34, obstructionArea: 5.15 * 11.985 }"
+          /\{ key: "lager2", label: "Lager 2", x: 16\.85 \+ separatorWidth, width: 16\.85, usableLength: 29, extendedLength: 34, obstructionArea: 5\.15 \* 6\.985 \}/,
+          "{ key: \"lager2\", label: \"Lager 2\", x: 16.85 + separatorWidth, width: 16.85, usableLength: 29, extendedLength: 34, obstructionArea: 5.15 * 11.985 }"
         );
         next = next.replace(
           "    const planLength = useLager2Extension ? 34 : 29;",
@@ -73,20 +73,17 @@ function lagerbyggFixes() {
           "      const displayLength = room.key === \"lager1\" ? room.baseLength : room.extendedLength;"
         );
         next = next.replace(
-          "<Slider label=\"Fri stablehøyde\" value={heightLimit} min={4.5} max={7.5} step={0.1} unit=\"m\" onChange={setHeightLimit} />",
-          "<Slider label=\"Fri stablehøyde\" value={heightLimit} min={4.5} max={10} step={0.1} unit=\"m\" onChange={setHeightLimit} />"
+          /(<Slider label="Fri stablehøyde"[^>]*max=\{)7\.5(\}[^>]*>)/,
+          "$110$2"
         );
+        next = next.replaceAll("5.15 x 6.99 m", "5.15 x 11.99 m");
         next = next.replace(
           "      const packingLimited = fit.compatible ? packLimits[load.packKey] : 0;",
           "      const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];\n      const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], physicalPackLimit) : 0;"
         );
         next = next.replace(
-          "        <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 6.99 m<br />{markedStatus}</div>\n        {useLager2Extension && <div className=\"extension-label\">Rosa felt lagt til som tilgjengelig Lager 2-areal</div>}",
-          "        <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 11.99 m<br />{markedStatus}</div>\n        <div className={useLager2Extension ? \"extension-label included\" : \"extension-label excluded\"}>Rosa felt<br />17.15 x 5.00 m<br />{useLager2Extension ? \"inkludert\" : \"fratrukket\"}</div>"
-        );
-        next = next.replace(
-          "function Segmented({ options, value, onChange }) { return <div className=\"segments\">{Object.entries(options).map(([key, option]) => <button key={key} className={value === key ? \"active\" : \"\"} onClick={() => onChange(key)} type=\"button\">{option.label}</button>)}</div>; }",
-          "function Segmented({ options, value, onChange }) { return <div className=\"segments\">{Object.entries(options).map(([key, option]) => { const title = option.length ? `Utvendige mål: ${option.length.toFixed(2)} x ${option.width.toFixed(2)} x ${option.height.toFixed(2)} m` : option.label; return <button key={key} title={title} className={value === key ? \"active\" : \"\"} onClick={() => onChange(key)} type=\"button\">{option.label}</button>; })}</div>; }"
+          "        {useLager2Extension && <div className=\"extension-label\">Rosa felt lagt til som tilgjengelig Lager 2-areal</div>}",
+          "        <div className={useLager2Extension ? \"extension-label included\" : \"extension-label excluded\"}>Rosa felt<br />17.15 x 5.00 m<br />{useLager2Extension ? \"inkludert\" : \"fratrukket\"}</div>"
         );
         next = next.replace(/function getFit\(container, size\) \{[\s\S]*?\n\}\n\nfunction getLimitingConstraint/, `${fitHelpers}\nfunction getLimitingConstraint`);
         return next;
