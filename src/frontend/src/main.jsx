@@ -356,6 +356,9 @@ function App() {
   const regularStackCount = Math.max(1, Math.floor(heightLimit / 2.4));
   const halfHeightStackCount = Math.max(1, Math.floor(heightLimit / 0.99));
   const clampedStackLimit = Math.min(stackLimit, maxStackLevel);
+  const selectedSteel = loadTypes[selectedSteelVariant];
+  const standardSteelFit = getFit(activeContainer, selectedSteel.size, "straight");
+  const rotatedSteelFit = getFit(activeContainer, selectedSteel.size, "rotated");
 
   return (
     <main className="app-shell">
@@ -427,6 +430,9 @@ function App() {
             <Slider label="Andel stålkasser" value={steelShare} min={0} max={100} step={1} unit="%" onChange={setSteelShare} />
             <Segmented options={steelVariantOptions} value={selectedSteelVariant} onChange={setSelectedSteelVariant} />
             <Toggle label="Roter stålkasser 90°" checked={rotateSteelBoxes} onChange={setRotateSteelBoxes} />
+            <div className="container-note">
+              Fysisk kapasitet for {selectedSteel.shortLabel}: standard {standardSteelFit.physicalCount} stk · 90° {rotatedSteelFit.physicalCount} stk. Valgt maksgrense: {steelPackLimit} stk.
+            </div>
             <Slider label="Andel kokiller" value={kokilleSharePct} min={0} max={100} step={1} unit="%" onChange={setKokilleSharePct} />
             <div className={model.shareTotal === 100 ? "derived" : "derived warning-text"}>Sum andeler: {model.shareTotal.toFixed(0)}%</div>
 
