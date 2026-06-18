@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertTriangle,
@@ -168,46 +168,70 @@ const optionalConstraints = {
 };
 
 const separatorWidth = 0.5;
+const settingsStoragePrefix = "lagerbygg-iii:v1:";
+
+function usePersistentState(key, initialValue) {
+  const [value, setValue] = useState(() => {
+    if (typeof window === "undefined") return initialValue;
+    try {
+      const savedValue = window.localStorage.getItem(`${settingsStoragePrefix}${key}`);
+      return savedValue === null ? initialValue : JSON.parse(savedValue);
+    } catch {
+      return initialValue;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(`${settingsStoragePrefix}${key}`, JSON.stringify(value));
+    } catch {
+      // Simulatoren skal fortsatt fungere dersom nettleseren blokkerer lokal lagring.
+    }
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
 const rooms = [
   { key: "lager1", label: "Lager 1", x: 0, width: 16.85, baseLength: 24.115, usableLength: 22.015, obstructionArea: 4.85 * 1.8 },
   { key: "lager2", label: "Lager 2", x: 16.85 + separatorWidth, width: 16.85, usableLength: 29, extendedLength: 34, obstructionArea: 5.15 * 11.985 }
 ];
 
 function App() {
-  const [planningMode, setPlanningMode] = useState("scenario");
-  const [heightLimit, setHeightLimit] = useState(6.3);
-  const [stackLimit, setStackLimit] = useState(4);
-  const [halfHeightStackLimit, setHalfHeightStackLimit] = useState(6);
-  const [wallClearance, setWallClearance] = useState(0.5);
-  const [doorClearance, setDoorClearance] = useState(0.9);
-  const [aisleGap, setAisleGap] = useState(0.8);
-  const [useLager2Extension, setUseLager2Extension] = useState(true);
-  const [includeMarkedAreas, setIncludeMarkedAreas] = useState(false);
-  const [containerType, setContainerType] = useState("iso15");
-  const [rotateContainers, setRotateContainers] = useState(false);
-  const [containerGrossLimit, setContainerGrossLimit] = useState(24000);
-  const [containerDoseLimit, setContainerDoseLimit] = useState(2);
-  const [trailerLimit, setTrailerLimit] = useState(30000);
-  const [selectedSteelVariant, setSelectedSteelVariant] = useState("steel1");
-  const [rotateSteelBoxes, setRotateSteelBoxes] = useState(false);
-  const [optimizeSteelOrientation, setOptimizeSteelOrientation] = useState(true);
-  const [drumPackLimit, setDrumPackLimit] = useState(12);
-  const [steelPackLimit, setSteelPackLimit] = useState(1);
-  const [kokillePackLimit, setKokillePackLimit] = useState(4);
-  const [existingDrumEq, setExistingDrumEq] = useState(582);
-  const [annualDrumEq, setAnnualDrumEq] = useState(200);
-  const [years, setYears] = useState(19);
-  const [drumShare, setDrumShare] = useState(68);
-  const [steelShare, setSteelShare] = useState(31);
-  const [kokilleSharePct, setKokilleSharePct] = useState(1);
-  const [drumWeight, setDrumWeight] = useState(330);
-  const [steelWeight, setSteelWeight] = useState(3000);
-  const [kokilleWeight, setKokilleWeight] = useState(1800);
-  const [drumDose, setDrumDose] = useState(0.12);
-  const [steelDose, setSteelDose] = useState(0.35);
-  const [kokilleDose, setKokilleDose] = useState(0.8);
-  const [customLoads, setCustomLoads] = useState({ drum210: 0, steel1: 100, steel2: 20, steel3: 0, steel4: 0, kokille: 0 });
-  const [activeConstraints, setActiveConstraints] = useState([]);
+  const [planningMode, setPlanningMode] = usePersistentState("planningMode", "scenario");
+  const [heightLimit, setHeightLimit] = usePersistentState("heightLimit", 6.3);
+  const [stackLimit, setStackLimit] = usePersistentState("stackLimit", 4);
+  const [halfHeightStackLimit, setHalfHeightStackLimit] = usePersistentState("halfHeightStackLimit", 6);
+  const [wallClearance, setWallClearance] = usePersistentState("wallClearance", 0.5);
+  const [doorClearance, setDoorClearance] = usePersistentState("doorClearance", 0.9);
+  const [aisleGap, setAisleGap] = usePersistentState("aisleGap", 0.8);
+  const [useLager2Extension, setUseLager2Extension] = usePersistentState("useLager2Extension", true);
+  const [includeMarkedAreas, setIncludeMarkedAreas] = usePersistentState("includeMarkedAreas", false);
+  const [containerType, setContainerType] = usePersistentState("containerType", "iso15");
+  const [rotateContainers, setRotateContainers] = usePersistentState("rotateContainers", false);
+  const [containerGrossLimit, setContainerGrossLimit] = usePersistentState("containerGrossLimit", 24000);
+  const [containerDoseLimit, setContainerDoseLimit] = usePersistentState("containerDoseLimit", 2);
+  const [trailerLimit, setTrailerLimit] = usePersistentState("trailerLimit", 30000);
+  const [selectedSteelVariant, setSelectedSteelVariant] = usePersistentState("selectedSteelVariant", "steel1");
+  const [rotateSteelBoxes, setRotateSteelBoxes] = usePersistentState("rotateSteelBoxes", false);
+  const [optimizeSteelOrientation, setOptimizeSteelOrientation] = usePersistentState("optimizeSteelOrientation", true);
+  const [drumPackLimit, setDrumPackLimit] = usePersistentState("drumPackLimit", 12);
+  const [steelPackLimit, setSteelPackLimit] = usePersistentState("steelPackLimit", 1);
+  const [kokillePackLimit, setKokillePackLimit] = usePersistentState("kokillePackLimit", 4);
+  const [existingDrumEq, setExistingDrumEq] = usePersistentState("existingDrumEq", 582);
+  const [annualDrumEq, setAnnualDrumEq] = usePersistentState("annualDrumEq", 200);
+  const [years, setYears] = usePersistentState("years", 19);
+  const [drumShare, setDrumShare] = usePersistentState("drumShare", 68);
+  const [steelShare, setSteelShare] = usePersistentState("steelShare", 31);
+  const [kokilleSharePct, setKokilleSharePct] = usePersistentState("kokilleSharePct", 1);
+  const [drumWeight, setDrumWeight] = usePersistentState("drumWeight", 330);
+  const [steelWeight, setSteelWeight] = usePersistentState("steelWeight", 3000);
+  const [kokilleWeight, setKokilleWeight] = usePersistentState("kokilleWeight", 1800);
+  const [drumDose, setDrumDose] = usePersistentState("drumDose", 0.12);
+  const [steelDose, setSteelDose] = usePersistentState("steelDose", 0.35);
+  const [kokilleDose, setKokilleDose] = usePersistentState("kokilleDose", 0.8);
+  const [customLoads, setCustomLoads] = usePersistentState("customLoads", { drum210: 0, steel1: 100, steel2: 20, steel3: 0, steel4: 0, kokille: 0 });
+  const [activeConstraints, setActiveConstraints] = usePersistentState("activeConstraints", []);
   const [showConstraintMenu, setShowConstraintMenu] = useState(false);
 
   const model = useMemo(() => {
