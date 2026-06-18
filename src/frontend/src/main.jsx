@@ -447,9 +447,13 @@ function App() {
   const clampedStackLimit = Math.min(stackLimit, maxStackLevel);
   const clampedHalfHeightStackLimit = activeHalfContainer ? Math.min(halfHeightStackLimit, maxHalfStackLevel) : 0;
   const selectedSteel = loadTypes[selectedSteelVariant];
-  const standardSteelFit = getFit(activeContainer, selectedSteel.size, "straight");
-  const rotatedSteelFit = getFit(activeContainer, selectedSteel.size, "rotated");
   const selectedSteelRow = model.loadRows.find((row) => row.key === selectedSteelVariant);
+  const selectedSteelContainer = selectedSteelRow?.containerChoice || activeContainer;
+  const standardSteelFit = getFit(selectedSteelContainer, selectedSteel.size, "straight");
+  const rotatedSteelFit = getFit(selectedSteelContainer, selectedSteel.size, "rotated");
+  const activeSteelRows = model.loadRows.filter((row) =>
+    row.shareKey === "steel" && (planningMode === "scenario" ? row.key === selectedSteelVariant : customLoads[row.key] > 0)
+  );
   const customPackageCount = Object.values(customLoads).reduce((sum, quantity) => sum + quantity, 0);
   const setCustomLoad = (key, value) => setCustomLoads((current) => ({ ...current, [key]: Math.max(0, Math.round(value)) }));
   const addConstraint = (key) => {
@@ -483,12 +487,7 @@ function App() {
         </header>
 
         <nav className="mode-tabs" aria-label="Planleggingsmodus">
-          <button type="button" className={planningMode === "scenario" ? "active" : ""} onClick={() => setPlanningMode("scenario")}>Scenario</button>
-          <button type="button" className={planningMode === "custom" ? "active" : ""} onClick={() => setPlanningMode("custom")}>Fri lastkombinasjon</button>
-        </nav>
-
-        <section className="summary-grid">
-          <SummaryCard icon={<Warehouse />} label="Lag…3002 tokens truncated…planningMode === "custom" ? " · lagt til" : " · med i scenario") : ""} · valgt {row.containerChoice.shortLabel}</small></span>
+          <button type="button" className={planningMode === "scenario" ? "active" : ""} onClick={() => setPlanningMode("scenario")}>S…3177 tokens truncated…planningMode === "custom" ? " · lagt til" : " · med i scenario") : ""} · valgt {row.containerChoice.shortLabel}</small></span>
                   <span>{row.fit.compatible ? "Ja" : "Nei"}<small>{row.fit.reason}</small></span>
                   <span><Badge type={row.limiting.key}>{row.limiting.label}</Badge><small>{row.limiting.hint}</small></span>
                   <span>{row.perContainer} stk<small>Vekt {formatLimit(row.weightLimited)} · dose {formatLimit(row.doseLimited)} · mønster {row.packingLimited} · {row.stackLevels} nivåer</small></span>
