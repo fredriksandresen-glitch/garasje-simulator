@@ -167,6 +167,7 @@ function App() {
   const [containerDoseLimit, setContainerDoseLimit] = useState(2);
   const [trailerLimit, setTrailerLimit] = useState(30000);
   const [selectedSteelVariant, setSelectedSteelVariant] = useState("steel1");
+  const [rotateSteelBoxes, setRotateSteelBoxes] = useState(false);
   const [drumPackLimit, setDrumPackLimit] = useState(12);
   const [steelPackLimit, setSteelPackLimit] = useState(1);
   const [kokillePackLimit, setKokillePackLimit] = useState(4);
@@ -229,7 +230,8 @@ function App() {
     const loadRows = Object.entries(loadTypes).map(([key, load]) => {
       const packageWeight = weights[key];
       const packageDose = doses[key];
-      const fit = getFit(container, load.size);
+      const orientationMode = load.shareKey === "steel" ? (rotateSteelBoxes ? "rotated" : "straight") : "auto";
+      const fit = getFit(container, load.size, orientationMode);
       const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];
       const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], physicalPackLimit) : 0;
       const weightLimited = Math.max(0, Math.floor((containerGrossLimit - container.tare) / Math.max(1, packageWeight)));
@@ -321,6 +323,7 @@ function App() {
     containerDoseLimit,
     trailerLimit,
     selectedSteelVariant,
+    rotateSteelBoxes,
     drumPackLimit,
     steelPackLimit,
     kokillePackLimit,
@@ -411,6 +414,7 @@ function App() {
             <Slider label="Andel 210L" value={drumShare} min={0} max={100} step={1} unit="%" onChange={setDrumShare} />
             <Slider label="Andel stålkasser" value={steelShare} min={0} max={100} step={1} unit="%" onChange={setSteelShare} />
             <Segmented options={steelVariantOptions} value={selectedSteelVariant} onChange={setSelectedSteelVariant} />
+            <Toggle label="Roter stålkasser 90°" checked={rotateSteelBoxes} onChange={setRotateSteelBoxes} />
             <Slider label="Andel kokiller" value={kokilleSharePct} min={0} max={100} step={1} unit="%" onChange={setKokilleSharePct} />
             <div className={model.shareTotal === 100 ? "derived" : "derived warning-text"}>Sum andeler: {model.shareTotal.toFixed(0)}%</div>
 
@@ -529,7 +533,7 @@ function ContainerFootprint({ model, slot }) {
             <span
               key={`${slot.key}-load-${index}`}
               className={`payload-symbol ${load.shareKey} ${load.key}`}
-              title={`${load.shortLabel}: ${load.dimensions}`}
+              title={`${load.shortLabel}: ${load.dimensions}${load.shareKey === "steel" ? ` · ${load.fit.orientation === "rotated" ? "90° rotert" : "standardretning"}` : ""}`}
               style={getPayloadStyle({ load, container: model.container, index })}
             >
               {load.shareKey === "steel" ? load.shortLabel : null}
@@ -560,13 +564,16 @@ function ConstraintPanel({ model }) {
   );
 }
 
-function getFootprintFit(container, size) {
+function getFootprintFit(container, size, orientationMode = "auto") {
   const orientations = [
     { length: size.length, width: size.width, orientation: "straight" },
     { length: size.width, width: size.length, orientation: "rotated" }
   ];
+  const candidates = orientationMode === "auto"
+    ? orientations
+    : orientations.filter((orientation) => orientation.orientation === orientationMode);
 
-  return orientations.reduce((best, orientation) => {
+  return candidates.reduce((best, orientation) => {
     const cols = Math.floor(container.usableWidth / orientation.width);
     const rows = Math.floor(container.usableLength / orientation.length);
     const count = Math.max(0, cols * rows);
@@ -574,9 +581,10 @@ function getFootprintFit(container, size) {
   }, { length: size.length, width: size.width, orientation: "straight", cols: 0, rows: 0, count: 0 });
 }
 
-function getFit(container, size) {
+function getFit(container, size, orientationMode = "auto") {
   const uprightFits = size.height <= container.usableHeight;
-  const footprint = getFootprintFit(container, size);
+  const footprint = getFootprintFit(container, size, orientationMode);
+  const orientationText = footprint.orientation === "rotated" ? "90° rotert" : "standardretning";
 
   if (uprightFits && footprint.count > 0) {
     return {
@@ -584,7 +592,7 @@ function getFit(container, size) {
       physicalCount: footprint.count,
       orientation: footprint.orientation,
       footprint,
-      reason: "Mål innenfor nyttig innvendig volum"
+      reason: `Mål passer i ${orientationText}`
     };
   }
   if (!uprightFits && footprint.count === 0) return { compatible: false, physicalCount: 0, footprint, reason: "For høy og for stort fotavtrykk" };
