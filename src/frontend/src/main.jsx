@@ -6,12 +6,15 @@ import {
   Gauge,
   HelpCircle,
   Layers,
+  Minus,
   Package,
+  Plus,
   Ruler,
   Scale,
   Settings2,
   Shield,
-  Warehouse
+  Warehouse,
+  X
 } from "lucide-react";
 import "./styles.css";
 
@@ -154,6 +157,15 @@ const containerFamilyOptions = {
   iso20: { label: "20' lengde", regularKey: "iso20", halfKey: null }
 };
 
+const optionalConstraints = {
+  grossWeight: { label: "Maks bruttovekt per container" },
+  dose: { label: "Maks dose per container" },
+  trailer: { label: "Maks trailerlast" },
+  drumPacking: { label: "Maks 210L per container" },
+  steelPacking: { label: "Maks stålkasser per container" },
+  kokillePacking: { label: "Maks kokiller per container" }
+};
+
 const separatorWidth = 0.5;
 const rooms = [
   { key: "lager1", label: "Lager 1", x: 0, width: 16.85, baseLength: 24.115, usableLength: 22.015, obstructionArea: 4.85 * 1.8 },
@@ -161,6 +173,7 @@ const rooms = [
 ];
 
 function App() {
+  const [planningMode, setPlanningMode] = useState("scenario");
   const [heightLimit, setHeightLimit] = useState(6.3);
   const [stackLimit, setStackLimit] = useState(4);
   const [halfHeightStackLimit, setHalfHeightStackLimit] = useState(6);
@@ -191,6 +204,9 @@ function App() {
   const [drumDose, setDrumDose] = useState(0.12);
   const [steelDose, setSteelDose] = useState(0.35);
   const [kokilleDose, setKokilleDose] = useState(0.8);
+  const [customLoads, setCustomLoads] = useState({ drum210: 0, steel1: 100, steel2: 20, steel3: 0, steel4: 0, kokille: 0 });
+  const [activeConstraints, setActiveConstraints] = useState([]);
+  const [showConstraintMenu, setShowConstraintMenu] = useState(false);
 
   const model = useMemo(() => {
     const containerFamily = containerFamilyOptions[containerType];
@@ -237,7 +253,9 @@ function App() {
     const totalFloorSlots = roomModels.reduce((sum, room) => sum + room.floorSlots, 0);
     const totalFootprintArea = roomModels.reduce((sum, room) => sum + room.effectiveArea, 0);
     const shareTotal = drumShare + steelShare + kokilleSharePct;
-    const totalNeed = existingDrumEq + annualDrumEq * years;
+    const scenarioNeed = existingDrumEq + annualDrumEq * years;
+    const customNeed = Object.entries(customLoads).reduce((sum, [key, quantity]) => sum + quantity * loadTypes[key].drumEq, 0);
+    const totalNeed = planningMode === "custom" ? customNeed : scenarioNeed;
     const weights = { drum210: drumWeight, steel1: steelWeight, steel2: steelWeight, steel3: steelWeight, steel4: steelWeight, kokille: kokilleWeight };
     const doses = { drum210: drumDose, steel1: steelDose, steel2: steelDose, steel3: steelDose, steel4: steelDose, kokille: kokilleDose };
     const packLimits = { drum: drumPackLimit, steel: steelPackLimit, kokille: kokillePackLimit };
@@ -249,11 +267,22 @@ function App() {
       const evaluateOption = (candidate, heightKind, stackLevels) => {
         const fit = getFit(candidate, load.size, orientationMode);
         const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];
-        const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], physicalPackLimit) : 0;
-        const weightLimited = Math.max(0, Math.floor((containerGrossLimit - candidate.tare) / Math.max(1, packageWeight)));
-        const doseLimited = Math.max(0, Math.floor(containerDoseLimit / Math.max(0.01, packageDose)));
+        const packingConstraintKey = `${load.packKey}Packing`;
+        const usePackingLimit = planningMode === "scenario" || activeConstraints.includes(packingConstraintKey);
+        const useWeightLimit = planningMode === "scenario" || activeConstraints.includes("grossWeight");
+        const useDoseLimit = planningMode === "scenario" || activeConstraints.includes("dose");
+        const packingLimited = fit.compatible ? Math.min(usePackingLimit ? packLimits[load.packKey] : physicalPackLimit, physicalPackLimit) : 0;
+        const weightLimited = useWeightLimit
+          ? Math.max(0, Math.floor((containerGrossLimit - candidate.tare) / Math.max(1, packageWeight)))
+          : Infinity;
+        const doseLimited = useDoseLimit
+          ? Math.max(0, Math.floor(containerDoseLimit / Math.max(0.01, packageDose)))
+          : Infinity;
         const perContainer = Math.max(0, Math.min(packingLimited, weightLimited, doseLimited));
-        const limiting = getLimitingConstraint({ fit, packingLimited, weightLimited, doseLimited, perContainer });
+        let limiting = getLimitingConstraint({ fit, packingLimited, weightLimited, doseLimited, perContainer });
+        if (planningMode === "custom" && !usePackingLimit && limiting.key === "packing") {
+          limiting = { key: "packing", label: "Fysisk kapasitet", hint: "Bestemt av innvendige mål og orientering" };
+        }
         const packageVolume = load.size.length * load.size.width * load.size.height;
         const usableVolume = candidate.usableLength * candidate.usableWidth * candidate.usableHeight;
         return {
@@ -276,21 +305,22 @@ function App() {
         b.floorEfficiency - a.floorEfficiency || b.volumeEfficiency - a.volumeEfficiency
       )[0];
       const { fit, packingLimited, weightLimited, doseLimited, perContainer, limiting } = selectedOption;
-      const share =
+      const share = planningMode === "custom" ? 0 :
         load.shareKey === "drum" ? drumShare / 100 :
         load.shareKey === "kokille" ? kokilleSharePct / 100 :
         key === selectedSteelVariant ? steelShare / 100 : 0;
-      const requestedDrumEq = totalNeed * share;
-      const packagesNeeded = requestedDrumEq / load.drumEq;
+      const packagesNeeded = planningMode === "custom" ? customLoads[key] : (totalNeed * share) / load.drumEq;
+      const requestedDrumEq = packagesNeeded * load.drumEq;
       const containersNeeded = packagesNeeded === 0 ? 0 : perContainer > 0 ? Math.ceil(packagesNeeded / perContainer) : Infinity;
       const floorSlotsNeeded = containersNeeded === 0 ? 0 : Number.isFinite(containersNeeded) ? Math.ceil(containersNeeded / selectedOption.stackLevels) : Infinity;
       const loadedWeight = selectedOption.container.tare + perContainer * packageWeight;
       const loadedDose = perContainer * packageDose;
-      const containersPerTrailer = Math.max(1, Math.floor(trailerLimit / Math.max(1, loadedWeight)));
+      const useTrailerLimit = planningMode === "scenario" || activeConstraints.includes("trailer");
+      const containersPerTrailer = useTrailerLimit ? Math.max(0, Math.floor(trailerLimit / Math.max(1, loadedWeight))) : null;
       return {
         key,
         ...load,
-        selected: key === selectedSteelVariant || load.shareKey !== "steel",
+        selected: planningMode === "custom" ? packagesNeeded > 0 : key === selectedSteelVariant || load.shareKey !== "steel",
         packageWeight,
         packageDose,
         fit,
@@ -341,6 +371,7 @@ function App() {
     const dominantLimit = Object.entries(limitingCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "none";
 
     return {
+      planningMode,
       container,
       halfContainer,
       containerPlacement,
@@ -368,6 +399,9 @@ function App() {
     heightLimit,
     stackLimit,
     halfHeightStackLimit,
+    planningMode,
+    customLoads,
+    activeConstraints,
     wallClearance,
     doorClearance,
     aisleGap,
@@ -397,7 +431,7 @@ function App() {
     kokilleDose
   ]);
 
-  const warnings = buildWarnings({ model, stackLimit, halfHeightStackLimit, drumWeight, steelWeight });
+  const warnings = buildWarnings({ model, planningMode, stackLimit, halfHeightStackLimit, drumWeight, steelWeight });
   const activeFamily = containerFamilyOptions[containerType];
   const activeContainer = containerTypes[activeFamily.regularKey];
   const activeHalfContainer = activeFamily.halfKey ? containerTypes[activeFamily.halfKey] : null;
@@ -410,6 +444,13 @@ function App() {
   const selectedSteel = loadTypes[selectedSteelVariant];
   const standardSteelFit = getFit(activeContainer, selectedSteel.size, "straight");
   const rotatedSteelFit = getFit(activeContainer, selectedSteel.size, "rotated");
+  const customPackageCount = Object.values(customLoads).reduce((sum, quantity) => sum + quantity, 0);
+  const setCustomLoad = (key, value) => setCustomLoads((current) => ({ ...current, [key]: Math.max(0, Math.round(value)) }));
+  const addConstraint = (key) => {
+    setActiveConstraints((current) => current.includes(key) ? current : [...current, key]);
+    setShowConstraintMenu(false);
+  };
+  const removeConstraint = (key) => setActiveConstraints((current) => current.filter((item) => item !== key));
 
   return (
     <main className="app-shell">
@@ -421,7 +462,7 @@ function App() {
           </div>
           <div className={model.mixedCoverage >= 1 ? "score good" : "score warn"}>
             <div className="score-label">
-              Scenario dekning
+              {planningMode === "custom" ? "Lastdekning" : "Scenario dekning"}
               <span className="info-dot" tabIndex="0">
                 <HelpCircle size={15} />
                 <span className="tooltip">Viser beregnede gulvplasser delt på nødvendige gulvplasser etter stabling. 100% betyr at scenarioet akkurat får plass.</span>
@@ -431,10 +472,15 @@ function App() {
           </div>
         </header>
 
+        <nav className="mode-tabs" aria-label="Planleggingsmodus">
+          <button type="button" className={planningMode === "scenario" ? "active" : ""} onClick={() => setPlanningMode("scenario")}>Scenario</button>
+          <button type="button" className={planningMode === "custom" ? "active" : ""} onClick={() => setPlanningMode("custom")}>Fri lastkombinasjon</button>
+        </nav>
+
         <section className="summary-grid">
           <SummaryCard icon={<Warehouse />} label="Lagerkapasitet" value={model.totalFloorSlots} unit="gulvplasser" />
           <SummaryCard icon={<Boxes />} label="Blandet behov" value={model.requiredFloorSlots} unit="gulvplasser" />
-          <SummaryCard icon={<Package />} label="Scenario" value={model.totalNeed} unit="drum eq." />
+          <SummaryCard icon={<Package />} label={planningMode === "custom" ? "Valgt last" : "Scenario"} value={planningMode === "custom" ? customPackageCount : model.totalNeed} unit={planningMode === "custom" ? "kolli" : "drum eq."} />
           <SummaryCard icon={<Layers />} label="Stablehøyde" value={model.levels} unit="nivåer" />
         </section>
 
@@ -474,33 +520,57 @@ function App() {
               Én valgt lengde betyr ett kranhode. Simulatoren velger automatisk normal eller half-height for hver avfallstype etter kapasitet per gulvplass.
             </div>
             <Toggle label="Roter containere 90° i lageret" checked={rotateContainers} onChange={setRotateContainers} />
-            <Slider label="Maks container bruttovekt" value={containerGrossLimit} min={3000} max={30000} step={500} unit="kg" onChange={setContainerGrossLimit} />
-            <Slider label="Maks trailerlast" value={trailerLimit} min={8000} max={50000} step={1000} unit="kg" onChange={setTrailerLimit} />
-            <Slider label="Maks dose per container" value={containerDoseLimit} min={0.2} max={10} step={0.1} unit="mSv/h" onChange={setContainerDoseLimit} />
+            {planningMode === "scenario" && <>
+              <Slider label="Maks container bruttovekt" value={containerGrossLimit} min={3000} max={30000} step={500} unit="kg" onChange={setContainerGrossLimit} />
+              <Slider label="Maks trailerlast" value={trailerLimit} min={8000} max={50000} step={1000} unit="kg" onChange={setTrailerLimit} />
+              <Slider label="Maks dose per container" value={containerDoseLimit} min={0.2} max={10} step={0.1} unit="mSv/h" onChange={setContainerDoseLimit} />
+            </>}
             <div className="container-note">
               <div><strong>Normal:</strong> utvendig {model.container.length.toFixed(2)} × {model.container.width.toFixed(2)} × {model.container.height.toFixed(2)} m · innvendig {model.container.usableLength.toFixed(2)} × {model.container.usableWidth.toFixed(2)} × {model.container.usableHeight.toFixed(2)} m</div>
               {model.halfContainer && <div><strong>Half-height:</strong> utvendig {model.halfContainer.length.toFixed(2)} × {model.halfContainer.width.toFixed(2)} × {model.halfContainer.height.toFixed(2)} m · innvendig {model.halfContainer.usableLength.toFixed(2)} × {model.halfContainer.usableWidth.toFixed(2)} × {model.halfContainer.usableHeight.toFixed(2)} m</div>}
               <div>Plassert fotavtrykk: {model.containerPlacement.length.toFixed(2)} × {model.containerPlacement.width.toFixed(2)} m ({model.containerRotated ? "90°" : "standard"})</div>
             </div>
 
-            <PanelTitle icon={<Package />} title="Pakkemønster" />
-            <Slider label="Maks 210L per container" value={drumPackLimit} min={1} max={24} step={1} unit="stk" onChange={setDrumPackLimit} />
-            <Slider label="Maks stålkasser per container" value={steelPackLimit} min={1} max={4} step={1} unit="stk" onChange={setSteelPackLimit} />
-            <Slider label="Maks kokiller per container" value={kokillePackLimit} min={1} max={8} step={1} unit="stk" onChange={setKokillePackLimit} />
+            {planningMode === "scenario" ? <>
+              <PanelTitle icon={<Package />} title="Pakkemønster" />
+              <Slider label="Maks 210L per container" value={drumPackLimit} min={1} max={24} step={1} unit="stk" onChange={setDrumPackLimit} />
+              <Slider label="Maks stålkasser per container" value={steelPackLimit} min={1} max={4} step={1} unit="stk" onChange={setSteelPackLimit} />
+              <Slider label="Maks kokiller per container" value={kokillePackLimit} min={1} max={8} step={1} unit="stk" onChange={setKokillePackLimit} />
 
-            <PanelTitle icon={<Ruler />} title="Behovsscenario" />
-            <Slider label="Eksisterende beholdning" value={existingDrumEq} min={0} max={1500} step={10} unit="drum eq." onChange={setExistingDrumEq} />
-            <Slider label="Årlig tilvekst" value={annualDrumEq} min={50} max={300} step={5} unit="drum eq." onChange={setAnnualDrumEq} />
-            <Slider label="År" value={years} min={5} max={25} step={1} unit="år" onChange={setYears} />
-            <Slider label="Andel 210L" value={drumShare} min={0} max={100} step={1} unit="%" onChange={setDrumShare} />
-            <Slider label="Andel stålkasser" value={steelShare} min={0} max={100} step={1} unit="%" onChange={setSteelShare} />
-            <Segmented options={steelVariantOptions} value={selectedSteelVariant} onChange={setSelectedSteelVariant} />
-            <Toggle label="Roter stålkasser 90°" checked={rotateSteelBoxes} onChange={setRotateSteelBoxes} />
-            <div className="container-note">
-              Fysisk kapasitet for {selectedSteel.shortLabel}: standard {standardSteelFit.physicalCount} stk · 90° {rotatedSteelFit.physicalCount} stk. Valgt maksgrense: {steelPackLimit} stk.
-            </div>
-            <Slider label="Andel kokiller" value={kokilleSharePct} min={0} max={100} step={1} unit="%" onChange={setKokilleSharePct} />
-            <div className={model.shareTotal === 100 ? "derived" : "derived warning-text"}>Sum andeler: {model.shareTotal.toFixed(0)}%</div>
+              <PanelTitle icon={<Ruler />} title="Behovsscenario" />
+              <Slider label="Eksisterende beholdning" value={existingDrumEq} min={0} max={1500} step={10} unit="drum eq." onChange={setExistingDrumEq} />
+              <Slider label="Årlig tilvekst" value={annualDrumEq} min={50} max={300} step={5} unit="drum eq." onChange={setAnnualDrumEq} />
+              <Slider label="År" value={years} min={5} max={25} step={1} unit="år" onChange={setYears} />
+              <Slider label="Andel 210L" value={drumShare} min={0} max={100} step={1} unit="%" onChange={setDrumShare} />
+              <Slider label="Andel stålkasser" value={steelShare} min={0} max={100} step={1} unit="%" onChange={setSteelShare} />
+              <Segmented options={steelVariantOptions} value={selectedSteelVariant} onChange={setSelectedSteelVariant} />
+              <Toggle label="Roter stålkasser 90°" checked={rotateSteelBoxes} onChange={setRotateSteelBoxes} />
+              <div className="container-note">
+                Fysisk kapasitet for {selectedSteel.shortLabel}: standard {standardSteelFit.physicalCount} stk · 90° {rotatedSteelFit.physicalCount} stk. Valgt maksgrense: {steelPackLimit} stk.
+              </div>
+              <Slider label="Andel kokiller" value={kokilleSharePct} min={0} max={100} step={1} unit="%" onChange={setKokilleSharePct} />
+              <div className={model.shareTotal === 100 ? "derived" : "derived warning-text"}>Sum andeler: {model.shareTotal.toFixed(0)}%</div>
+            </> : <>
+              <PanelTitle icon={<Package />} title="Legg til last" />
+              <div className="load-builder">
+                {Object.entries(loadTypes).map(([key, load]) => (
+                  <QuantityControl key={key} label={load.label} detail={load.dimensions} value={customLoads[key]} onChange={(value) => setCustomLoad(key, value)} />
+                ))}
+              </div>
+              <Toggle label="Roter stålkasser 90°" checked={rotateSteelBoxes} onChange={setRotateSteelBoxes} />
+
+              <PanelTitle icon={<Shield />} title="Valgte begrensninger" />
+              <div className="constraint-builder">
+                {activeConstraints.length === 0 && <div className="container-note">Ingen valgfrie begrensninger er lagt til. Fysiske mål og fri stablehøyde gjelder fortsatt.</div>}
+                {activeConstraints.map((key) => (
+                  <ActiveConstraint key={key} constraintKey={key} onRemove={() => removeConstraint(key)} values={{ containerGrossLimit, containerDoseLimit, trailerLimit, drumPackLimit, steelPackLimit, kokillePackLimit }} setters={{ setContainerGrossLimit, setContainerDoseLimit, setTrailerLimit, setDrumPackLimit, setSteelPackLimit, setKokillePackLimit }} />
+                ))}
+                <button className="add-constraint" type="button" onClick={() => setShowConstraintMenu((current) => !current)}><Plus size={17} />Legg til begrensning</button>
+                {showConstraintMenu && <div className="constraint-menu">
+                  {Object.entries(optionalConstraints).filter(([key]) => !activeConstraints.includes(key)).map(([key, item]) => <button type="button" key={key} onClick={() => addConstraint(key)}>{item.label}</button>)}
+                </div>}
+              </div>
+            </>}
 
             <PanelTitle icon={<Scale />} title="Lastdata" />
             <Slider label="Tønnevekt" value={drumWeight} min={50} max={700} step={5} unit="kg" onChange={setDrumWeight} />
@@ -531,11 +601,11 @@ function App() {
               </div>
               {model.loadRows.map((row) => (
                 <div className={`table-row ${row.fit.compatible ? "" : "incompatible"} ${row.selected ? "selected-row" : ""}`} key={row.key}>
-                  <span><strong>{row.label}</strong><small>{row.dimensions}{row.selected ? " · med i scenario" : ""} · valgt {row.containerChoice.shortLabel}</small></span>
+                  <span><strong>{row.label}</strong><small>{row.dimensions}{row.selected ? (planningMode === "custom" ? " · lagt til" : " · med i scenario") : ""} · valgt {row.containerChoice.shortLabel}</small></span>
                   <span>{row.fit.compatible ? "Ja" : "Nei"}<small>{row.fit.reason}</small></span>
                   <span><Badge type={row.limiting.key}>{row.limiting.label}</Badge><small>{row.limiting.hint}</small></span>
-                  <span>{row.perContainer} stk<small>Vekt {row.weightLimited} · dose {row.doseLimited} · mønster {row.packingLimited} · {row.stackLevels} nivåer</small></span>
-                  <span>{formatNumber(row.loadedWeight)} kg / {row.containersPerTrailer} cont.<small>{formatNumber(row.loadedDose)} mSv/h · behov {formatNumber(row.containersNeeded)} cont.</small></span>
+                  <span>{row.perContainer} stk<small>Vekt {formatLimit(row.weightLimited)} · dose {formatLimit(row.doseLimited)} · mønster {row.packingLimited} · {row.stackLevels} nivåer</small></span>
+                  <span>{formatNumber(row.loadedWeight)} kg{row.containersPerTrailer === null ? "" : ` / ${row.containersPerTrailer} cont.`}<small>{formatNumber(row.loadedDose)} mSv/h · behov {formatNumber(row.containersNeeded)} cont.</small></span>
                 </div>
               ))}
             </div>
@@ -634,7 +704,7 @@ function ConstraintPanel({ model }) {
   return (
     <section className="constraint-panel" aria-label="Dimensjonerende begrensninger">
       <div className="constraint-card main-limit">
-        <span>Dimensjonerende scenario</span>
+        <span>{model.planningMode === "custom" ? "Valgt lastkombinasjon" : "Dimensjonerende scenario"}</span>
         <strong>{model.mixedCoverage >= 1 ? "Lageret dekker behovet" : "Lagerplass er begrensningen"}</strong>
         <small>{formatNumber(model.totalFloorSlots)} gulvplasser mot {formatNumber(model.requiredFloorSlots)} nødvendige gulvplasser etter stabling.</small>
       </div>
@@ -779,7 +849,7 @@ function getLimitingConstraint({ fit, packingLimited, weightLimited, doseLimited
   return limiting;
 }
 
-function buildWarnings({ model, stackLimit, halfHeightStackLimit, drumWeight, steelWeight }) {
+function buildWarnings({ model, planningMode, stackLimit, halfHeightStackLimit, drumWeight, steelWeight }) {
   const warnings = [];
   if (model.mixedCoverage < 1) warnings.push({ level: "critical", text: `Blandet scenario mangler ca. ${formatNumber(model.requiredFloorSlots - model.totalFloorSlots)} gulvplasser etter stabling.` });
   if (stackLimit > 4) warnings.push({ level: "warn", text: "5 i høyden er kun testmodus. Nederste kasse/container må kontrolleres for trykkbelastning." });
@@ -787,7 +857,7 @@ function buildWarnings({ model, stackLimit, halfHeightStackLimit, drumWeight, st
   if (drumWeight > 330) warnings.push({ level: "critical", text: "Tønnevekt overstiger 330 kg UN-/spesifikasjonsgrensen fra rapporten." });
   if (steelWeight > 2500) warnings.push({ level: "warn", text: "Stålkassevekt overstiger 2500 kg truckgrense. Alternativ løftemetode må vurderes." });
   if (steelWeight > 3000) warnings.push({ level: "critical", text: "Stålkassevekt overstiger antatt 3000 kg stålkassegrense." });
-  if (model.shareTotal !== 100) warnings.push({ level: "warn", text: `Avfallsmiksen summerer til ${model.shareTotal.toFixed(0)}%. Juster 210L, stålkasser og kokiller til 100%.` });
+  if (planningMode === "scenario" && model.shareTotal !== 100) warnings.push({ level: "warn", text: `Avfallsmiksen summerer til ${model.shareTotal.toFixed(0)}%. Juster 210L, stålkasser og kokiller til 100%.` });
   for (const row of model.scenarioRows) {
     if (row.perContainer === 0) warnings.push({ level: "critical", text: `${row.label} kan ikke pakkes med gjeldende container, mål, vekt- eller dosegrense.` });
     else if (row.packageDose > 2) warnings.push({ level: "warn", text: `${row.label} har dose over 2 mSv/h per kolli og bør håndteres særskilt.` });
@@ -795,6 +865,31 @@ function buildWarnings({ model, stackLimit, halfHeightStackLimit, drumWeight, st
   }
   if (warnings.length === 0) warnings.push({ level: "ok", text: "Ingen åpenbare brudd med gjeldende simuleringsgrenser." });
   return warnings;
+}
+
+function QuantityControl({ label, detail, value, onChange }) {
+  return (
+    <div className="quantity-control">
+      <div><strong>{label}</strong><small>{detail}</small></div>
+      <div className="quantity-stepper">
+        <button type="button" title={`Fjern én ${label}`} onClick={() => onChange(value - 1)}><Minus size={16} /></button>
+        <input type="number" min="0" step="1" value={value} aria-label={`Antall ${label}`} onChange={(event) => onChange(Number(event.target.value) || 0)} />
+        <button type="button" title={`Legg til én ${label}`} onClick={() => onChange(value + 1)}><Plus size={16} /></button>
+      </div>
+    </div>
+  );
+}
+
+function ActiveConstraint({ constraintKey, onRemove, values, setters }) {
+  const controls = {
+    grossWeight: <Slider label="Maks bruttovekt per container" value={values.containerGrossLimit} min={3000} max={30000} step={500} unit="kg" onChange={setters.setContainerGrossLimit} />,
+    dose: <Slider label="Maks dose per container" value={values.containerDoseLimit} min={0.2} max={10} step={0.1} unit="mSv/h" onChange={setters.setContainerDoseLimit} />,
+    trailer: <Slider label="Maks trailerlast" value={values.trailerLimit} min={8000} max={50000} step={1000} unit="kg" onChange={setters.setTrailerLimit} />,
+    drumPacking: <Slider label="Maks 210L per container" value={values.drumPackLimit} min={1} max={24} step={1} unit="stk" onChange={setters.setDrumPackLimit} />,
+    steelPacking: <Slider label="Maks stålkasser per container" value={values.steelPackLimit} min={1} max={4} step={1} unit="stk" onChange={setters.setSteelPackLimit} />,
+    kokillePacking: <Slider label="Maks kokiller per container" value={values.kokillePackLimit} min={1} max={8} step={1} unit="stk" onChange={setters.setKokillePackLimit} />
+  };
+  return <div className="active-constraint"><button className="remove-constraint" type="button" title={`Fjern ${optionalConstraints[constraintKey].label}`} onClick={onRemove}><X size={15} /></button>{controls[constraintKey]}</div>;
 }
 
 function SummaryCard({ icon, label, value, unit }) {
@@ -838,5 +933,6 @@ function Segmented({ options, value, onChange }) {
   );
 }
 function formatNumber(value) { if (!Number.isFinite(value)) return "∞"; return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value); }
+function formatLimit(value) { return Number.isFinite(value) ? formatNumber(value) : "ikke aktiv"; }
 
 createRoot(document.getElementById("root")).render(<App />);
