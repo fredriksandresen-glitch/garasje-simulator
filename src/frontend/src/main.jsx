@@ -487,7 +487,144 @@ function App() {
         </header>
 
         <nav className="mode-tabs" aria-label="Planleggingsmodus">
-          <button type="button" className={planningMode === "scenario" ? "active" : ""} onClick={() => setPlanningMode("scenario")}>S…3177 tokens truncated…planningMode === "custom" ? " · lagt til" : " · med i scenario") : ""} · valgt {row.containerChoice.shortLabel}</small></span>
+          <button type="button" className={planningMode === "scenario" ? "active" : ""} onClick={() => setPlanningMode("scenario")}>Scenario</button>
+          <button type="button" className={planningMode === "custom" ? "active" : ""} onClick={() => setPlanningMode("custom")}>Fri lastkombinasjon</button>
+        </nav>
+
+        <section className="summary-grid">
+          <SummaryCard icon={<Warehouse />} label="Lagerkapasitet" value={model.totalFloorSlots} unit="gulvplasser" />
+          <SummaryCard icon={<Boxes />} label="Blandet behov" value={model.requiredFloorSlots} unit="gulvplasser" />
+          <SummaryCard icon={<Package />} label={planningMode === "custom" ? "Valgt last" : "Scenario"} value={planningMode === "custom" ? customPackageCount : model.totalNeed} unit={planningMode === "custom" ? "kolli" : "drum eq."} />
+          <SummaryCard icon={<Layers />} label="Stablehøyde" value={model.levels} unit="nivåer" />
+        </section>
+
+        <div className="workspace">
+          <aside className="controls" aria-label="Simuleringsparametere">
+            <PanelTitle icon={<Settings2 />} title="Bygg og logistikk" />
+            <Slider label="Fri stablehøyde" value={heightLimit} min={4.5} max={10} step={0.1} unit="m" onChange={setHeightLimit} />
+            <div className="container-note">
+              Ved {formatNumber(heightLimit)} m fri høyde: {regularStackCount} normale containere{activeHalfContainer ? ` eller ${halfHeightStackCount} half-height-containere` : ""} i høyden.
+            </div>
+            <Slider label="Maks nivåer, normal høyde" value={clampedStackLimit} min={1} max={maxStackLevel} step={1} unit="stk" onChange={setStackLimit} />
+            {activeHalfContainer ? (
+              <Slider label="Maks nivåer, half-height" value={clampedHalfHeightStackLimit} min={1} max={maxHalfStackLevel} step={1} unit="stk" onChange={setHalfHeightStackLimit} />
+            ) : (
+              <div className="container-note">20' half-height er ikke aktivert fordi verifiserte dimensjonsdata mangler.</div>
+            )}
+            <Slider label="Avstand til personsluser/dører" value={doorClearance} min={0.3} max={2} step={0.1} unit="m" onChange={setDoorClearance} />
+            <Slider label="Gang/luft mellom containere" value={aisleGap} min={0.1} max={2.5} step={0.1} unit="m" onChange={setAisleGap} />
+            <Slider label="Veggklarering" value={wallClearance} min={0} max={1.5} step={0.1} unit="m" onChange={setWallClearance} />
+            <Toggle label="Ta med rosa felt i Lager 2" checked={useLager2Extension} onChange={setUseLager2Extension} />
+            <Toggle label="Ta med gule slusefelt som lagerareal" checked={includeMarkedAreas} onChange={setIncludeMarkedAreas} />
+
+            <PanelTitle icon={<Shield />} title="Container og grenser" />
+            <Segmented options={containerFamilyOptions} value={containerType} onChange={(nextType) => {
+              const nextFamily = containerFamilyOptions[nextType];
+              const nextRegular = containerTypes[nextFamily.regularKey];
+              const nextHalf = nextFamily.halfKey ? containerTypes[nextFamily.halfKey] : null;
+              const nextMax = Math.max(1, Math.floor(heightLimit / nextRegular.height));
+              setContainerType(nextType);
+              setStackLimit((current) => Math.min(current, nextMax));
+              if (nextHalf) {
+                const nextHalfMax = Math.max(1, Math.floor(heightLimit / nextHalf.height));
+                setHalfHeightStackLimit((current) => Math.min(current, nextHalfMax));
+              }
+            }} />
+            <div className="container-note">
+              Én valgt lengde betyr ett kranhode. Simulatoren velger automatisk normal eller half-height for hver avfallstype etter kapasitet per gulvplass.
+            </div>
+            <Toggle label="Roter containere 90° i lageret" checked={rotateContainers} onChange={setRotateContainers} />
+            {planningMode === "scenario" && <>
+              <Slider label="Maks container bruttovekt" value={containerGrossLimit} min={3000} max={30000} step={500} unit="kg" onChange={setContainerGrossLimit} />
+              <Slider label="Maks trailerlast" value={trailerLimit} min={8000} max={50000} step={1000} unit="kg" onChange={setTrailerLimit} />
+              <Slider label="Maks dose per container" value={containerDoseLimit} min={0.2} max={10} step={0.1} unit="mSv/h" onChange={setContainerDoseLimit} />
+            </>}
+            <div className="container-note">
+              <div><strong>Normal:</strong> utvendig {model.container.length.toFixed(2)} × {model.container.width.toFixed(2)} × {model.container.height.toFixed(2)} m · innvendig {model.container.usableLength.toFixed(2)} × {model.container.usableWidth.toFixed(2)} × {model.container.usableHeight.toFixed(2)} m</div>
+              {model.halfContainer && <div><strong>Half-height:</strong> utvendig {model.halfContainer.length.toFixed(2)} × {model.halfContainer.width.toFixed(2)} × {model.halfContainer.height.toFixed(2)} m · innvendig {model.halfContainer.usableLength.toFixed(2)} × {model.halfContainer.usableWidth.toFixed(2)} × {model.halfContainer.usableHeight.toFixed(2)} m</div>}
+              <div>Plassert fotavtrykk: {model.containerPlacement.length.toFixed(2)} × {model.containerPlacement.width.toFixed(2)} m ({model.containerRotated ? "90°" : "standard"})</div>
+            </div>
+
+            {planningMode === "scenario" ? <>
+              <PanelTitle icon={<Package />} title="Pakkemønster" />
+              <Slider label="Maks 210L per container" value={drumPackLimit} min={1} max={24} step={1} unit="stk" onChange={setDrumPackLimit} />
+              <Slider label="Maks stålkasser per container" value={steelPackLimit} min={1} max={4} step={1} unit="stk" onChange={setSteelPackLimit} />
+              <Slider label="Maks kokiller per container" value={kokillePackLimit} min={1} max={8} step={1} unit="stk" onChange={setKokillePackLimit} />
+
+              <PanelTitle icon={<Ruler />} title="Behovsscenario" />
+              <Slider label="Eksisterende beholdning" value={existingDrumEq} min={0} max={1500} step={10} unit="drum eq." onChange={setExistingDrumEq} />
+              <Slider label="Årlig tilvekst" value={annualDrumEq} min={50} max={300} step={5} unit="drum eq." onChange={setAnnualDrumEq} />
+              <Slider label="År" value={years} min={5} max={25} step={1} unit="år" onChange={setYears} />
+              <Slider label="Andel 210L" value={drumShare} min={0} max={100} step={1} unit="%" onChange={setDrumShare} />
+              <Slider label="Andel stålkasser" value={steelShare} min={0} max={100} step={1} unit="%" onChange={setSteelShare} />
+              <Segmented options={steelVariantOptions} value={selectedSteelVariant} onChange={setSelectedSteelVariant} />
+              <button className={`optimize-button ${optimizeSteelOrientation ? "active" : ""}`} type="button" onClick={() => setOptimizeSteelOrientation(true)}><RotateCw size={17} />Optimaliser stålkasser i valgt container</button>
+              <Toggle label="Bruk 90° manuelt" checked={!optimizeSteelOrientation && rotateSteelBoxes} onChange={setManualSteelRotation} />
+              <div className="container-note">
+                Fysisk kapasitet for {selectedSteel.shortLabel} i {selectedSteelContainer.shortLabel}: standard {standardSteelFit.physicalCount} stk · 90° {rotatedSteelFit.physicalCount} stk. {optimizeSteelOrientation ? `Valgt automatisk: ${selectedSteelRow?.fit.orientation === "rotated" ? "90°" : "standard"}.` : `Valgt manuelt: ${rotateSteelBoxes ? "90°" : "standard"}.`} Maksgrense: {steelPackLimit} stk.
+              </div>
+              <Slider label="Andel kokiller" value={kokilleSharePct} min={0} max={100} step={1} unit="%" onChange={setKokilleSharePct} />
+              <div className={model.shareTotal === 100 ? "derived" : "derived warning-text"}>Sum andeler: {model.shareTotal.toFixed(0)}%</div>
+            </> : <>
+              <PanelTitle icon={<Package />} title="Legg til last" />
+              <div className="load-builder">
+                {Object.entries(loadTypes).map(([key, load]) => (
+                  <QuantityControl key={key} label={load.label} detail={load.dimensions} value={customLoads[key]} onChange={(value) => setCustomLoad(key, value)} />
+                ))}
+              </div>
+              <button className={`optimize-button ${optimizeSteelOrientation ? "active" : ""}`} type="button" onClick={() => setOptimizeSteelOrientation(true)}><RotateCw size={17} />Optimaliser stålkasser i valgt container</button>
+              <Toggle label="Bruk 90° manuelt" checked={!optimizeSteelOrientation && rotateSteelBoxes} onChange={setManualSteelRotation} />
+              <div className="container-note">
+                {optimizeSteelOrientation
+                  ? activeSteelRows.length > 0
+                    ? activeSteelRows.map((row) => `${row.shortLabel} i ${row.containerChoice.shortLabel}: ${row.fit.orientation === "rotated" ? "90°" : "standard"}, ${row.fit.physicalCount} stk`).join(" · ")
+                    : "Legg til en stålkassevariant. Simulatoren tester standard og 90° og velger retningen med flest plasser."
+                  : `Manuell retning brukes for alle stålkasser: ${rotateSteelBoxes ? "90°" : "standard"}.`}
+              </div>
+
+              <PanelTitle icon={<Shield />} title="Valgte begrensninger" />
+              <div className="constraint-builder">
+                {activeConstraints.length === 0 && <div className="container-note">Ingen valgfrie begrensninger er lagt til. Fysiske mål og fri stablehøyde gjelder fortsatt.</div>}
+                {activeConstraints.map((key) => (
+                  <ActiveConstraint key={key} constraintKey={key} onRemove={() => removeConstraint(key)} values={{ containerGrossLimit, containerDoseLimit, trailerLimit, drumPackLimit, steelPackLimit, kokillePackLimit }} setters={{ setContainerGrossLimit, setContainerDoseLimit, setTrailerLimit, setDrumPackLimit, setSteelPackLimit, setKokillePackLimit }} />
+                ))}
+                <button className="add-constraint" type="button" onClick={() => setShowConstraintMenu((current) => !current)}><Plus size={17} />Legg til begrensning</button>
+                {showConstraintMenu && <div className="constraint-menu">
+                  {Object.entries(optionalConstraints).filter(([key]) => !activeConstraints.includes(key)).map(([key, item]) => <button type="button" key={key} onClick={() => addConstraint(key)}>{item.label}</button>)}
+                </div>}
+              </div>
+            </>}
+
+            <PanelTitle icon={<Scale />} title="Lastdata" />
+            <Slider label="Tønnevekt" value={drumWeight} min={50} max={700} step={5} unit="kg" onChange={setDrumWeight} />
+            <Slider label="Stålkassevekt" value={steelWeight} min={500} max={4000} step={25} unit="kg" onChange={setSteelWeight} />
+            <Slider label="Kokillevekt" value={kokilleWeight} min={200} max={5000} step={50} unit="kg" onChange={setKokilleWeight} />
+            <Slider label="Dose per tønne" value={drumDose} min={0.01} max={3} step={0.01} unit="mSv/h" onChange={setDrumDose} />
+            <Slider label="Dose per stålkasse" value={steelDose} min={0.01} max={8} step={0.05} unit="mSv/h" onChange={setSteelDose} />
+            <Slider label="Dose per kokille" value={kokilleDose} min={0.01} max={8} step={0.05} unit="mSv/h" onChange={setKokilleDose} />
+          </aside>
+
+          <section className="stage" aria-label="Lageroversikt">
+            <div className="stage-header">
+              <div>
+                <h2>Arkitektbasert plassmodell</h2>
+                <p>Felles målestokk: total bredde {model.planWidth.toFixed(2)} m, visningslengde {model.planLength.toFixed(2)} m, stablehøyde {formatNumber(model.levels * model.container.height)} m.</p>
+              </div>
+              <div className="capacity-pill">{formatNumber(model.totalFootprintArea)} m² effektivt areal</div>
+            </div>
+            <ArchitecturalPlan model={model} includeMarkedAreas={includeMarkedAreas} useLager2Extension={useLager2Extension} />
+            <ConstraintPanel model={model} />
+            <div className="results-table">
+              <div className="table-row table-head">
+                <span>Lasttype</span>
+                <span>Passer i valgt container</span>
+                <span>Begrensning</span>
+                <span>Per container</span>
+                <span>Last / trailer</span>
+              </div>
+              {model.loadRows.map((row) => (
+                <div className={`table-row ${row.fit.compatible ? "" : "incompatible"} ${row.selected ? "selected-row" : ""}`} key={row.key}>
+                  <span><strong>{row.label}</strong><small>{row.dimensions}{row.selected ? (planningMode === "custom" ? " · lagt til" : " · med i scenario") : ""} · valgt {row.containerChoice.shortLabel}</small></span>
                   <span>{row.fit.compatible ? "Ja" : "Nei"}<small>{row.fit.reason}</small></span>
                   <span><Badge type={row.limiting.key}>{row.limiting.label}</Badge><small>{row.limiting.hint}</small></span>
                   <span>{row.perContainer} stk<small>Vekt {formatLimit(row.weightLimited)} · dose {formatLimit(row.doseLimited)} · mønster {row.packingLimited} · {row.stackLevels} nivåer</small></span>
