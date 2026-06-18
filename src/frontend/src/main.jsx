@@ -163,6 +163,7 @@ function App() {
   const [useLager2Extension, setUseLager2Extension] = useState(true);
   const [includeMarkedAreas, setIncludeMarkedAreas] = useState(false);
   const [containerType, setContainerType] = useState("iso20");
+  const [rotateContainers, setRotateContainers] = useState(false);
   const [containerGrossLimit, setContainerGrossLimit] = useState(24000);
   const [containerDoseLimit, setContainerDoseLimit] = useState(2);
   const [trailerLimit, setTrailerLimit] = useState(30000);
@@ -186,7 +187,10 @@ function App() {
 
   const model = useMemo(() => {
     const container = containerTypes[containerType];
-    const footprint = { length: container.length + aisleGap, width: container.width + aisleGap };
+    const containerPlacement = rotateContainers
+      ? { length: container.width, width: container.length }
+      : { length: container.length, width: container.width };
+    const footprint = { length: containerPlacement.length + aisleGap, width: containerPlacement.width + aisleGap };
     const maxLevelsForHeight = Math.max(1, Math.floor(heightLimit / container.height));
     const levels = Math.max(1, Math.min(stackLimit, maxLevelsForHeight));
     const planWidth = 16.85 * 2 + separatorWidth;
@@ -278,6 +282,8 @@ function App() {
       const { slots, nextOffset } = buildRoomVisualSlots({
         room,
         container,
+        containerPlacement,
+        containerRotated: rotateContainers,
         levels,
         wallClearance,
         aisleGap,
@@ -295,6 +301,8 @@ function App() {
 
     return {
       container,
+      containerPlacement,
+      containerRotated: rotateContainers,
       levels,
       maxLevelsForHeight,
       planWidth,
@@ -319,6 +327,7 @@ function App() {
     useLager2Extension,
     includeMarkedAreas,
     containerType,
+    rotateContainers,
     containerGrossLimit,
     containerDoseLimit,
     trailerLimit,
@@ -395,11 +404,14 @@ function App() {
               setContainerType(nextType);
               setStackLimit((current) => Math.min(current, nextMax));
             }} />
+            <Toggle label="Roter containere 90° i lageret" checked={rotateContainers} onChange={setRotateContainers} />
             <Slider label="Maks container bruttovekt" value={containerGrossLimit} min={3000} max={30000} step={500} unit="kg" onChange={setContainerGrossLimit} />
             <Slider label="Maks trailerlast" value={trailerLimit} min={8000} max={50000} step={1000} unit="kg" onChange={setTrailerLimit} />
             <Slider label="Maks dose per container" value={containerDoseLimit} min={0.2} max={10} step={0.1} unit="mSv/h" onChange={setContainerDoseLimit} />
             <div className="container-note">
-              Innvendig nyttemål: {model.container.usableLength.toFixed(2)} x {model.container.usableWidth.toFixed(2)} x {model.container.usableHeight.toFixed(2)} m
+              <div>Utvendige mål (L × B × H): {model.container.length.toFixed(2)} × {model.container.width.toFixed(2)} × {model.container.height.toFixed(2)} m</div>
+              <div>Innvendige nyttemål: {model.container.usableLength.toFixed(2)} × {model.container.usableWidth.toFixed(2)} × {model.container.usableHeight.toFixed(2)} m</div>
+              <div>Plassert fotavtrykk: {model.containerPlacement.length.toFixed(2)} × {model.containerPlacement.width.toFixed(2)} m ({model.containerRotated ? "90°" : "standard"})</div>
             </div>
 
             <PanelTitle icon={<Package />} title="Pakkemønster" />
@@ -524,7 +536,7 @@ function ContainerFootprint({ model, slot }) {
       title={slot.title}
     >
       <div className="container-label">
-        <span>{model.container.label}</span>
+        <span>{model.container.label}{model.containerRotated ? " · 90°" : ""}</span>
         {slot.stackCount > 1 && <strong>x{slot.stackCount}</strong>}
       </div>
       {load ? (
@@ -534,7 +546,7 @@ function ContainerFootprint({ model, slot }) {
               key={`${slot.key}-load-${index}`}
               className={`payload-symbol ${load.shareKey} ${load.key}`}
               title={`${load.shortLabel}: ${load.dimensions}${load.shareKey === "steel" ? ` · ${load.fit.orientation === "rotated" ? "90° rotert" : "standardretning"}` : ""}`}
-              style={getPayloadStyle({ load, container: model.container, index })}
+              style={getPayloadStyle({ load, container: model.container, containerRotated: model.containerRotated, index })}
             >
               {load.shareKey === "steel" ? load.shortLabel : null}
             </span>
@@ -611,7 +623,7 @@ function buildContainerQueue(scenarioRows, totalContainerSlots) {
   return queue;
 }
 
-function buildRoomVisualSlots({ room, container, levels, wallClearance, aisleGap, visualQueue, offset }) {
+function buildRoomVisualSlots({ room, container, containerPlacement, containerRotated, levels, wallClearance, aisleGap, visualQueue, offset }) {
   const slots = [];
   let nextOffset = offset;
   for (let col = 0; col < room.cols; col += 1) {
@@ -621,9 +633,9 @@ function buildRoomVisualSlots({ room, container, levels, wallClearance, aisleGap
       nextOffset += levels;
       const load = stackLoads[0] || null;
       const stackKeys = new Set(stackLoads.map((stackLoad) => stackLoad.key));
-      const xMeters = wallClearance + row * (container.width + aisleGap);
-      const yFromBottom = wallClearance + col * (container.length + aisleGap);
-      const topMeters = room.displayLength - yFromBottom - container.length;
+      const xMeters = wallClearance + row * (containerPlacement.width + aisleGap);
+      const yFromBottom = wallClearance + col * (containerPlacement.length + aisleGap);
+      const topMeters = room.displayLength - yFromBottom - containerPlacement.length;
       slots.push({
         key: `${room.key}-${col}-${row}`,
         load,
@@ -631,30 +643,38 @@ function buildRoomVisualSlots({ room, container, levels, wallClearance, aisleGap
         mixed: stackKeys.size > 1,
         leftPct: (xMeters / room.width) * 100,
         topPct: (Math.max(0, topMeters) / room.displayLength) * 100,
-        widthPct: (container.width / room.width) * 100,
-        heightPct: (container.length / room.displayLength) * 100,
+        widthPct: (containerPlacement.width / room.width) * 100,
+        heightPct: (containerPlacement.length / room.displayLength) * 100,
         title: load
-          ? `${container.label}: ${load.perContainer} ${load.label.toLowerCase()} per container, ${stackLoads.length} nivå(er)`
-          : `${container.label}: ledig plass`
+          ? `${container.label}${containerRotated ? " · 90° i lageret" : ""}: ${load.perContainer} ${load.label.toLowerCase()} per container, ${stackLoads.length} nivå(er)`
+          : `${container.label}${containerRotated ? " · 90° i lageret" : ""}: ledig plass`
       });
     }
   }
   return { slots, nextOffset };
 }
 
-function getPayloadStyle({ load, container, index }) {
+function getPayloadStyle({ load, container, containerRotated, index }) {
   const footprint = load.fit.footprint || {
     width: load.size.width,
     length: load.size.length,
     cols: 1
   };
-  const widthPct = (load.size.width / container.usableWidth) * 100;
-  const heightPct = (load.size.length / container.usableLength) * 100;
-  const cellWidthPct = (footprint.width / container.usableWidth) * 100;
-  const cellHeightPct = (footprint.length / container.usableLength) * 100;
+  const viewWidth = containerRotated ? container.usableLength : container.usableWidth;
+  const viewLength = containerRotated ? container.usableWidth : container.usableLength;
+  const itemWidth = containerRotated ? load.size.length : load.size.width;
+  const itemLength = containerRotated ? load.size.width : load.size.length;
+  const footprintWidth = containerRotated ? footprint.length : footprint.width;
+  const footprintLength = containerRotated ? footprint.width : footprint.length;
+  const widthPct = (itemWidth / viewWidth) * 100;
+  const heightPct = (itemLength / viewLength) * 100;
+  const cellWidthPct = (footprintWidth / viewWidth) * 100;
+  const cellHeightPct = (footprintLength / viewLength) * 100;
   const cols = Math.max(1, footprint.cols);
-  const column = index % cols;
-  const row = Math.floor(index / cols);
+  const originalColumn = index % cols;
+  const originalRow = Math.floor(index / cols);
+  const column = containerRotated ? originalRow : originalColumn;
+  const row = containerRotated ? originalColumn : originalRow;
   const centerX = column * cellWidthPct + cellWidthPct / 2;
   const centerY = row * cellHeightPct + cellHeightPct / 2;
   const left = centerX - widthPct / 2;
