@@ -1,12 +1,15 @@
-# Garasje Simulator
+# Lagerbygg III Simulator
 
-Garasje Simulator er satt opp for samme arbeidsflyt som Handball Tracker:
+Interaktiv kapasitets- og begrensningsmodell for Lagerbygg III.
 
-1. Codex lager endringer på en egen GitHub-branch.
-2. Vercel lager preview-deploy fra branchen.
-3. Fredrik tester previewen.
-4. Når previewen er godkjent, får clawdbot en ferdig melding for ICP-deploy.
-5. Clawdbot deployer til eksisterende ICP-canister.
+Appen modellerer foreløpig:
+
+- Lager 1 og Lager 2 med justerbare tilgjengelige arealer
+- stablehøyde, gangavstand, veggklarering og 900 mm dør-/sluseavstand
+- 210L tønner, stålkasser og kokiller
+- ISO-container-valg
+- containervekt, trailerlast, kollivekt og dosegrenser
+- behovsscenario basert på eksisterende beholdning og årlig tilvekst i drum equivalents
 
 ## Lokal utvikling
 
@@ -44,7 +47,10 @@ Output Directory: dist
 
 ## ICP
 
-Dette prosjektet er klargjort for assets-canister på ICP via `dfx.json`.
-Canister-IDer legges inn i `canister_ids.json` når clawdbot har opprettet dem.
+Live frontend canister:
+
+```text
+https://znz7v-gyaaa-aaaal-qxdtq-cai.icp0.io/
+```
 
 Codex skal ikke deploye direkte til ICP fra denne maskinen. ICP-deploy gjøres av clawdbot etter at Vercel-preview er godkjent.
