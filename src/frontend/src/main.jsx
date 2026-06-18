@@ -648,20 +648,24 @@ function getPayloadStyle({ load, container, index }) {
     length: load.size.length,
     cols: 1
   };
-  const drawingWidth = 90;
-  const drawingLength = 82;
-  const widthPct = (footprint.width / container.usableWidth) * drawingWidth;
-  const heightPct = (footprint.length / container.usableLength) * drawingLength;
+  const widthPct = (load.size.width / container.usableWidth) * 100;
+  const heightPct = (load.size.length / container.usableLength) * 100;
+  const cellWidthPct = (footprint.width / container.usableWidth) * 100;
+  const cellHeightPct = (footprint.length / container.usableLength) * 100;
   const cols = Math.max(1, footprint.cols);
   const column = index % cols;
   const row = Math.floor(index / cols);
-  const left = 5 + column * widthPct;
-  const top = 12 + row * heightPct;
+  const centerX = column * cellWidthPct + cellWidthPct / 2;
+  const centerY = row * cellHeightPct + cellHeightPct / 2;
+  const left = centerX - widthPct / 2;
+  const top = centerY - heightPct / 2;
   return {
     left: `${left}%`,
     top: `${top}%`,
     width: `calc(${widthPct}% - 2px)`,
-    height: `calc(${heightPct}% - 2px)`
+    height: `calc(${heightPct}% - 2px)`,
+    transform: footprint.orientation === "rotated" ? "rotate(90deg)" : "none",
+    transformOrigin: "center"
   };
 }
 
