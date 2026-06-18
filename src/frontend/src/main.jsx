@@ -529,6 +529,7 @@ function ContainerFootprint({ model, slot }) {
             <span
               key={`${slot.key}-load-${index}`}
               className={`payload-symbol ${load.shareKey}`}
+              title={`${load.shortLabel}: ${load.dimensions}`}
               style={getPayloadStyle({ load, container: model.container, index })}
             />
           ))}
@@ -632,26 +633,26 @@ function buildRoomVisualSlots({ room, container, levels, wallClearance, aisleGap
 }
 
 function getPayloadStyle({ load, container, index }) {
-  const rotated = load.fit.orientation === "rotated";
-  const itemWidth = rotated ? load.size.length : load.size.width;
-  const itemLength = rotated ? load.size.width : load.size.length;
-  const widthPct = clamp((itemWidth / container.usableWidth) * 86, load.shareKey === "drum" ? 10 : 18, 64);
-  const heightPct = clamp((itemLength / container.usableLength) * 86, load.shareKey === "drum" ? 10 : 14, 64);
-  const stepX = widthPct + 4;
-  const stepY = heightPct + 5;
-  const cols = Math.max(1, Math.floor(90 / stepX));
-  const left = 5 + (index % cols) * stepX;
-  const top = 13 + Math.floor(index / cols) * stepY;
-  return {
-    left: `${Math.min(left, 92 - widthPct)}%`,
-    top: `${Math.min(top, 90 - heightPct)}%`,
-    width: `${widthPct}%`,
-    height: `${heightPct}%`
+  const footprint = load.fit.footprint || {
+    width: load.size.width,
+    length: load.size.length,
+    cols: 1
   };
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
+  const drawingWidth = 90;
+  const drawingLength = 82;
+  const widthPct = (footprint.width / container.usableWidth) * drawingWidth;
+  const heightPct = (footprint.length / container.usableLength) * drawingLength;
+  const cols = Math.max(1, footprint.cols);
+  const column = index % cols;
+  const row = Math.floor(index / cols);
+  const left = 5 + column * widthPct;
+  const top = 12 + row * heightPct;
+  return {
+    left: `${left}%`,
+    top: `${top}%`,
+    width: `calc(${widthPct}% - 2px)`,
+    height: `calc(${heightPct}% - 2px)`
+  };
 }
 
 function getLimitingConstraint({ fit, packingLimited, weightLimited, doseLimited, perContainer }) {
@@ -722,3 +723,4 @@ function Segmented({ options, value, onChange }) {
 function formatNumber(value) { if (!Number.isFinite(value)) return "∞"; return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value); }
 
 createRoot(document.getElementById("root")).render(<App />);
+
