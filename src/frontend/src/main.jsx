@@ -148,6 +148,12 @@ const containerTypes = {
   }
 };
 
+const containerFamilyOptions = {
+  iso10: { label: "10' lengde", regularKey: "iso10", halfKey: "iso10hh" },
+  iso15: { label: "15' lengde", regularKey: "iso15", halfKey: "iso15hh" },
+  iso20: { label: "20' lengde", regularKey: "iso20", halfKey: null }
+};
+
 const separatorWidth = 0.5;
 const rooms = [
   { key: "lager1", label: "Lager 1", x: 0, width: 16.85, baseLength: 24.115, usableLength: 22.015, obstructionArea: 4.85 * 1.8 },
@@ -157,12 +163,13 @@ const rooms = [
 function App() {
   const [heightLimit, setHeightLimit] = useState(6.3);
   const [stackLimit, setStackLimit] = useState(4);
+  const [halfHeightStackLimit, setHalfHeightStackLimit] = useState(6);
   const [wallClearance, setWallClearance] = useState(0.5);
   const [doorClearance, setDoorClearance] = useState(0.9);
   const [aisleGap, setAisleGap] = useState(0.8);
   const [useLager2Extension, setUseLager2Extension] = useState(true);
   const [includeMarkedAreas, setIncludeMarkedAreas] = useState(false);
-  const [containerType, setContainerType] = useState("iso20");
+  const [containerType, setContainerType] = useState("iso15");
   const [rotateContainers, setRotateContainers] = useState(false);
   const [containerGrossLimit, setContainerGrossLimit] = useState(24000);
   const [containerDoseLimit, setContainerDoseLimit] = useState(2);
@@ -186,13 +193,17 @@ function App() {
   const [kokilleDose, setKokilleDose] = useState(0.8);
 
   const model = useMemo(() => {
-    const container = containerTypes[containerType];
+    const containerFamily = containerFamilyOptions[containerType];
+    const container = containerTypes[containerFamily.regularKey];
+    const halfContainer = containerFamily.halfKey ? containerTypes[containerFamily.halfKey] : null;
     const containerPlacement = rotateContainers
       ? { length: container.width, width: container.length }
       : { length: container.length, width: container.width };
     const footprint = { length: containerPlacement.length + aisleGap, width: containerPlacement.width + aisleGap };
     const maxLevelsForHeight = Math.max(1, Math.floor(heightLimit / container.height));
     const levels = Math.max(1, Math.min(stackLimit, maxLevelsForHeight));
+    const maxHalfLevelsForHeight = halfContainer ? Math.max(1, Math.floor(heightLimit / halfContainer.height)) : 0;
+    const halfLevels = halfContainer ? Math.max(1, Math.min(halfHeightStackLimit, maxHalfLevelsForHeight)) : 0;
     const planWidth = 16.85 * 2 + separatorWidth;
     const planLength = 34;
 
@@ -212,7 +223,7 @@ function App() {
         cols,
         rows,
         floorSlots,
-        totalSlots: floorSlots * levels,
+        totalSlots: floorSlots,
         wallClearance,
         doorClearance,
         effectiveArea: clearWidth * clearLength - (includeMarkedAreas ? 0 : room.obstructionArea),
@@ -223,7 +234,7 @@ function App() {
       };
     });
 
-    const totalContainerSlots = roomModels.reduce((sum, room) => sum + room.totalSlots, 0);
+    const totalFloorSlots = roomModels.reduce((sum, room) => sum + room.floorSlots, 0);
     const totalFootprintArea = roomModels.reduce((sum, room) => sum + room.effectiveArea, 0);
     const shareTotal = drumShare + steelShare + kokilleSharePct;
     const totalNeed = existingDrumEq + annualDrumEq * years;
@@ -235,13 +246,36 @@ function App() {
       const packageWeight = weights[key];
       const packageDose = doses[key];
       const orientationMode = load.shareKey === "steel" ? (rotateSteelBoxes ? "rotated" : "straight") : "auto";
-      const fit = getFit(container, load.size, orientationMode);
-      const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];
-      const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], physicalPackLimit) : 0;
-      const weightLimited = Math.max(0, Math.floor((containerGrossLimit - container.tare) / Math.max(1, packageWeight)));
-      const doseLimited = Math.max(0, Math.floor(containerDoseLimit / Math.max(0.01, packageDose)));
-      const perContainer = Math.max(0, Math.min(packingLimited, weightLimited, doseLimited));
-      const limiting = getLimitingConstraint({ fit, packingLimited, weightLimited, doseLimited, perContainer });
+      const evaluateOption = (candidate, heightKind, stackLevels) => {
+        const fit = getFit(candidate, load.size, orientationMode);
+        const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];
+        const packingLimited = fit.compatible ? Math.min(packLimits[load.packKey], physicalPackLimit) : 0;
+        const weightLimited = Math.max(0, Math.floor((containerGrossLimit - candidate.tare) / Math.max(1, packageWeight)));
+        const doseLimited = Math.max(0, Math.floor(containerDoseLimit / Math.max(0.01, packageDose)));
+        const perContainer = Math.max(0, Math.min(packingLimited, weightLimited, doseLimited));
+        const limiting = getLimitingConstraint({ fit, packingLimited, weightLimited, doseLimited, perContainer });
+        const packageVolume = load.size.length * load.size.width * load.size.height;
+        const usableVolume = candidate.usableLength * candidate.usableWidth * candidate.usableHeight;
+        return {
+          container: candidate,
+          heightKind,
+          stackLevels,
+          fit,
+          packingLimited,
+          weightLimited,
+          doseLimited,
+          perContainer,
+          limiting,
+          floorEfficiency: perContainer * stackLevels * load.drumEq,
+          volumeEfficiency: usableVolume > 0 ? (perContainer * packageVolume) / usableVolume : 0
+        };
+      };
+      const options = [evaluateOption(container, "regular", levels)];
+      if (halfContainer) options.push(evaluateOption(halfContainer, "half", halfLevels));
+      const selectedOption = options.sort((a, b) =>
+        b.floorEfficiency - a.floorEfficiency || b.volumeEfficiency - a.volumeEfficiency
+      )[0];
+      const { fit, packingLimited, weightLimited, doseLimited, perContainer, limiting } = selectedOption;
       const share =
         load.shareKey === "drum" ? drumShare / 100 :
         load.shareKey === "kokille" ? kokilleSharePct / 100 :
@@ -249,7 +283,8 @@ function App() {
       const requestedDrumEq = totalNeed * share;
       const packagesNeeded = requestedDrumEq / load.drumEq;
       const containersNeeded = packagesNeeded === 0 ? 0 : perContainer > 0 ? Math.ceil(packagesNeeded / perContainer) : Infinity;
-      const loadedWeight = container.tare + perContainer * packageWeight;
+      const floorSlotsNeeded = containersNeeded === 0 ? 0 : Number.isFinite(containersNeeded) ? Math.ceil(containersNeeded / selectedOption.stackLevels) : Infinity;
+      const loadedWeight = selectedOption.container.tare + perContainer * packageWeight;
       const loadedDose = perContainer * packageDose;
       const containersPerTrailer = Math.max(1, Math.floor(trailerLimit / Math.max(1, loadedWeight)));
       return {
@@ -267,16 +302,23 @@ function App() {
         requestedDrumEq,
         packagesNeeded,
         containersNeeded,
+        floorSlotsNeeded,
+        containerChoice: selectedOption.container,
+        heightKind: selectedOption.heightKind,
+        stackLevels: selectedOption.stackLevels,
+        floorEfficiency: selectedOption.floorEfficiency,
+        volumeEfficiency: selectedOption.volumeEfficiency,
         loadedWeight,
         loadedDose,
         containersPerTrailer,
-        capacityDrumEq: totalContainerSlots * perContainer * load.drumEq
+        capacityDrumEq: totalFloorSlots * selectedOption.floorEfficiency
       };
     });
 
     const scenarioRows = loadRows.filter((row) => row.requestedDrumEq > 0);
     const requiredContainers = scenarioRows.reduce((sum, row) => sum + row.containersNeeded, 0);
-    const visualQueue = buildContainerQueue(scenarioRows, totalContainerSlots);
+    const requiredFloorSlots = scenarioRows.reduce((sum, row) => sum + row.floorSlotsNeeded, 0);
+    const visualQueue = buildFloorStackQueue(scenarioRows, totalFloorSlots);
     let visualOffset = 0;
     const visualRoomModels = roomModels.map((room) => {
       const { slots, nextOffset } = buildRoomVisualSlots({
@@ -284,7 +326,6 @@ function App() {
         container,
         containerPlacement,
         containerRotated: rotateContainers,
-        levels,
         wallClearance,
         aisleGap,
         visualQueue,
@@ -301,26 +342,32 @@ function App() {
 
     return {
       container,
+      halfContainer,
       containerPlacement,
       containerRotated: rotateContainers,
       levels,
+      halfLevels,
       maxLevelsForHeight,
+      maxHalfLevelsForHeight,
       planWidth,
       planLength,
       roomModels: visualRoomModels,
-      totalContainerSlots,
+      totalContainerSlots: totalFloorSlots,
+      totalFloorSlots,
       totalFootprintArea,
       totalNeed,
       shareTotal,
       loadRows,
       scenarioRows,
       requiredContainers,
+      requiredFloorSlots,
       dominantLimit,
-      mixedCoverage: totalContainerSlots / Math.max(1, requiredContainers)
+      mixedCoverage: totalFloorSlots / Math.max(1, requiredFloorSlots)
     };
   }, [
     heightLimit,
     stackLimit,
+    halfHeightStackLimit,
     wallClearance,
     doorClearance,
     aisleGap,
@@ -350,12 +397,16 @@ function App() {
     kokilleDose
   ]);
 
-  const warnings = buildWarnings({ model, stackLimit, drumWeight, steelWeight });
-  const activeContainer = containerTypes[containerType];
+  const warnings = buildWarnings({ model, stackLimit, halfHeightStackLimit, drumWeight, steelWeight });
+  const activeFamily = containerFamilyOptions[containerType];
+  const activeContainer = containerTypes[activeFamily.regularKey];
+  const activeHalfContainer = activeFamily.halfKey ? containerTypes[activeFamily.halfKey] : null;
   const maxStackLevel = Math.max(1, Math.floor(heightLimit / activeContainer.height));
-  const regularStackCount = Math.max(1, Math.floor(heightLimit / 2.4));
-  const halfHeightStackCount = Math.max(1, Math.floor(heightLimit / 0.99));
+  const maxHalfStackLevel = activeHalfContainer ? Math.max(1, Math.floor(heightLimit / activeHalfContainer.height)) : 0;
+  const regularStackCount = Math.max(1, Math.floor(heightLimit / activeContainer.height));
+  const halfHeightStackCount = activeHalfContainer ? Math.max(1, Math.floor(heightLimit / activeHalfContainer.height)) : 0;
   const clampedStackLimit = Math.min(stackLimit, maxStackLevel);
+  const clampedHalfHeightStackLimit = activeHalfContainer ? Math.min(halfHeightStackLimit, maxHalfStackLevel) : 0;
   const selectedSteel = loadTypes[selectedSteelVariant];
   const standardSteelFit = getFit(activeContainer, selectedSteel.size, "straight");
   const rotatedSteelFit = getFit(activeContainer, selectedSteel.size, "rotated");
@@ -373,7 +424,7 @@ function App() {
               Scenario dekning
               <span className="info-dot" tabIndex="0">
                 <HelpCircle size={15} />
-                <span className="tooltip">Viser beregnede containerplasser delt på antall containere som trengs for valgt avfallsmiks. 100% betyr at scenarioet akkurat får plass.</span>
+                <span className="tooltip">Viser beregnede gulvplasser delt på nødvendige gulvplasser etter stabling. 100% betyr at scenarioet akkurat får plass.</span>
               </span>
             </div>
             <div className="score-value"><Gauge size={20} /><span>{Math.round(model.mixedCoverage * 100)}%</span></div>
@@ -381,8 +432,8 @@ function App() {
         </header>
 
         <section className="summary-grid">
-          <SummaryCard icon={<Warehouse />} label="Lagerkapasitet" value={model.totalContainerSlots} unit="containerplasser" />
-          <SummaryCard icon={<Boxes />} label="Blandet behov" value={model.requiredContainers} unit="containere" />
+          <SummaryCard icon={<Warehouse />} label="Lagerkapasitet" value={model.totalFloorSlots} unit="gulvplasser" />
+          <SummaryCard icon={<Boxes />} label="Blandet behov" value={model.requiredFloorSlots} unit="gulvplasser" />
           <SummaryCard icon={<Package />} label="Scenario" value={model.totalNeed} unit="drum eq." />
           <SummaryCard icon={<Layers />} label="Stablehøyde" value={model.levels} unit="nivåer" />
         </section>
@@ -392,9 +443,14 @@ function App() {
             <PanelTitle icon={<Settings2 />} title="Bygg og logistikk" />
             <Slider label="Fri stablehøyde" value={heightLimit} min={4.5} max={10} step={0.1} unit="m" onChange={setHeightLimit} />
             <div className="container-note">
-              Ved {formatNumber(heightLimit)} m fri høyde: {regularStackCount} vanlige ISO-containere eller {halfHeightStackCount} half-height-containere i høyden.
+              Ved {formatNumber(heightLimit)} m fri høyde: {regularStackCount} normale containere{activeHalfContainer ? ` eller ${halfHeightStackCount} half-height-containere` : ""} i høyden.
             </div>
-            <Slider label="Maks nivåer" value={clampedStackLimit} min={1} max={maxStackLevel} step={1} unit="stk" onChange={setStackLimit} />
+            <Slider label="Maks nivåer, normal høyde" value={clampedStackLimit} min={1} max={maxStackLevel} step={1} unit="stk" onChange={setStackLimit} />
+            {activeHalfContainer ? (
+              <Slider label="Maks nivåer, half-height" value={clampedHalfHeightStackLimit} min={1} max={maxHalfStackLevel} step={1} unit="stk" onChange={setHalfHeightStackLimit} />
+            ) : (
+              <div className="container-note">20' half-height er ikke aktivert fordi verifiserte dimensjonsdata mangler.</div>
+            )}
             <Slider label="Avstand til personsluser/dører" value={doorClearance} min={0.3} max={2} step={0.1} unit="m" onChange={setDoorClearance} />
             <Slider label="Gang/luft mellom containere" value={aisleGap} min={0.1} max={2.5} step={0.1} unit="m" onChange={setAisleGap} />
             <Slider label="Veggklarering" value={wallClearance} min={0} max={1.5} step={0.1} unit="m" onChange={setWallClearance} />
@@ -402,36 +458,22 @@ function App() {
             <Toggle label="Ta med gule slusefelt som lagerareal" checked={includeMarkedAreas} onChange={setIncludeMarkedAreas} />
 
             <PanelTitle icon={<Shield />} title="Container og grenser" />
-            <Segmented options={containerTypes} value={containerType} onChange={(nextType) => {
-              const nextMax = Math.max(1, Math.floor(heightLimit / containerTypes[nextType].height));
+            <Segmented options={containerFamilyOptions} value={containerType} onChange={(nextType) => {
+              const nextFamily = containerFamilyOptions[nextType];
+              const nextRegular = containerTypes[nextFamily.regularKey];
+              const nextHalf = nextFamily.halfKey ? containerTypes[nextFamily.halfKey] : null;
+              const nextMax = Math.max(1, Math.floor(heightLimit / nextRegular.height));
               setContainerType(nextType);
               setStackLimit((current) => Math.min(current, nextMax));
+              if (nextHalf) {
+                const nextHalfMax = Math.max(1, Math.floor(heightLimit / nextHalf.height));
+                setHalfHeightStackLimit((current) => Math.min(current, nextHalfMax));
+              }
             }} />
-            <Toggle label="Roter containere 90° i lageret" checked={rotateContainers} onChange={setRotateContainers} />
-            <Slider label="Maks container bruttovekt" value={containerGrossLimit} min={3000} max={30000} step={500} unit="kg" onChange={setContainerGrossLimit} />
-            <Slider label="Maks trailerlast" value={trailerLimit} min={8000} max={50000} step={1000} unit="kg" onChange={setTrailerLimit} />
-            <Slider label="Maks dose per container" value={containerDoseLimit} min={0.2} max={10} step={0.1} unit="mSv/h" onChange={setContainerDoseLimit} />
             <div className="container-note">
-              <div>Utvendige mål (L × B × H): {model.container.length.toFixed(2)} × {model.container.width.toFixed(2)} × {model.container.height.toFixed(2)} m</div>
-              <div>Innvendige nyttemål: {model.container.usableLength.toFixed(2)} × {model.container.usableWidth.toFixed(2)} × {model.container.usableHeight.toFixed(2)} m</div>
-              <div>Plassert fotavtrykk: {model.containerPlacement.length.toFixed(2)} × {model.containerPlacement.width.toFixed(2)} m ({model.containerRotated ? "90°" : "standard"})</div>
+              Én valgt lengde betyr ett kranhode. Simulatoren velger automatisk normal eller half-height for hver avfallstype etter kapasitet per gulvplass.
             </div>
-
-            <PanelTitle icon={<Package />} title="Pakkemønster" />
-            <Slider label="Maks 210L per container" value={drumPackLimit} min={1} max={24} step={1} unit="stk" onChange={setDrumPackLimit} />
-            <Slider label="Maks stålkasser per container" value={steelPackLimit} min={1} max={4} step={1} unit="stk" onChange={setSteelPackLimit} />
-            <Slider label="Maks kokiller per container" value={kokillePackLimit} min={1} max={8} step={1} unit="stk" onChange={setKokillePackLimit} />
-
-            <PanelTitle icon={<Ruler />} title="Behovsscenario" />
-            <Slider label="Eksisterende beholdning" value={existingDrumEq} min={0} max={1500} step={10} unit="drum eq." onChange={setExistingDrumEq} />
-            <Slider label="Årlig tilvekst" value={annualDrumEq} min={50} max={300} step={5} unit="drum eq." onChange={setAnnualDrumEq} />
-            <Slider label="År" value={years} min={5} max={25} step={1} unit="år" onChange={setYears} />
-            <Slider label="Andel 210L" value={drumShare} min={0} max={100} step={1} unit="%" onChange={setDrumShare} />
-            <Slider label="Andel stålkasser" value={steelShare} min={0} max={100} step={1} unit="%" onChange={setSteelShare} />
-            <Segmented options={steelVariantOptions} value={selectedSteelVariant} onChange={setSelectedSteelVariant} />
-            <Toggle label="Roter stålkasser 90°" checked={rotateSteelBoxes} onChange={setRotateSteelBoxes} />
-            <div className="container-note">
-              Fysisk kapasitet for {selectedSteel.shortLabel}: standard {standardSteelFit.physicalCount} stk · 90° {rotatedSteelFit.physicalCount} stk. Valgt maksgrense: {steelPackLimit} stk.
+            <Toggle label="Roter containere 90° i lageret"…753 tokens truncated…lectedSteel.shortLabel}: standard {standardSteelFit.physicalCount} stk · 90° {rotatedSteelFit.physicalCount} stk. Valgt maksgrense: {steelPackLimit} stk.
             </div>
             <Slider label="Andel kokiller" value={kokilleSharePct} min={0} max={100} step={1} unit="%" onChange={setKokilleSharePct} />
             <div className={model.shareTotal === 100 ? "derived" : "derived warning-text"}>Sum andeler: {model.shareTotal.toFixed(0)}%</div>
@@ -465,10 +507,10 @@ function App() {
               </div>
               {model.loadRows.map((row) => (
                 <div className={`table-row ${row.fit.compatible ? "" : "incompatible"} ${row.selected ? "selected-row" : ""}`} key={row.key}>
-                  <span><strong>{row.label}</strong><small>{row.dimensions}{row.selected ? " · med i scenario" : ""}</small></span>
+                  <span><strong>{row.label}</strong><small>{row.dimensions}{row.selected ? " · med i scenario" : ""} · valgt {row.containerChoice.shortLabel}</small></span>
                   <span>{row.fit.compatible ? "Ja" : "Nei"}<small>{row.fit.reason}</small></span>
                   <span><Badge type={row.limiting.key}>{row.limiting.label}</Badge><small>{row.limiting.hint}</small></span>
-                  <span>{row.perContainer} stk<small>Vekt {row.weightLimited} · dose {row.doseLimited} · mønster {row.packingLimited}</small></span>
+                  <span>{row.perContainer} stk<small>Vekt {row.weightLimited} · dose {row.doseLimited} · mønster {row.packingLimited} · {row.stackLevels} nivåer</small></span>
                   <span>{formatNumber(row.loadedWeight)} kg / {row.containersPerTrailer} cont.<small>{formatNumber(row.loadedDose)} mSv/h · behov {formatNumber(row.containersNeeded)} cont.</small></span>
                 </div>
               ))}
@@ -526,15 +568,16 @@ function PlanRoom({ room, model }) {
       <div className="container-layer">
         {room.visualSlots.map((slot) => <ContainerFootprint key={slot.key} model={model} slot={slot} />)}
       </div>
-      <div className="plan-room-footer">{room.totalSlots} plasser · {room.rows} rader x {room.cols} lengder</div>
+      <div className="plan-room-footer">{room.totalSlots} gulvplasser · {room.rows} rader x {room.cols} lengder</div>
     </article>
   );
 }
 
 function ContainerFootprint({ model, slot }) {
   const load = slot.load;
+  const renderedContainer = load?.containerChoice || model.container;
   const loadClass = load ? `load-${load.shareKey}` : "load-empty";
-  const containerClass = model.container.height < 1.2 ? "half-height" : model.container.length < 4 ? "iso10" : "iso20";
+  const containerClass = renderedContainer.height < 1.2 ? "half-height" : renderedContainer.length < 4 ? "iso10" : "iso20";
   return (
     <div
       className={`container-footprint ${containerClass} ${loadClass} ${slot.mixed ? "mixed-stack" : ""}`}
@@ -542,7 +585,7 @@ function ContainerFootprint({ model, slot }) {
       title={slot.title}
     >
       <div className="container-label">
-        <span>{model.container.label}{model.containerRotated ? " · 90°" : ""}</span>
+        <span>{renderedContainer.label}{model.containerRotated ? " · 90°" : ""}</span>
         {slot.stackCount > 1 && <strong>x{slot.stackCount}</strong>}
       </div>
       {load ? (
@@ -552,7 +595,7 @@ function ContainerFootprint({ model, slot }) {
               key={`${slot.key}-load-${index}`}
               className={`payload-symbol ${load.shareKey} ${load.key}`}
               title={`${load.shortLabel}: ${load.dimensions}${load.shareKey === "steel" ? ` · ${load.fit.orientation === "rotated" ? "90° rotert" : "standardretning"}` : ""}`}
-              style={getPayloadStyle({ load, container: model.container, containerRotated: model.containerRotated, index })}
+              style={getPayloadStyle({ load, container: renderedContainer, containerRotated: model.containerRotated, index })}
             >
               {load.shareKey === "steel" ? load.shortLabel : null}
             </span>
@@ -569,13 +612,13 @@ function ConstraintPanel({ model }) {
       <div className="constraint-card main-limit">
         <span>Dimensjonerende scenario</span>
         <strong>{model.mixedCoverage >= 1 ? "Lageret dekker behovet" : "Lagerplass er begrensningen"}</strong>
-        <small>{formatNumber(model.totalContainerSlots)} containerplasser mot {formatNumber(model.requiredContainers)} nødvendige containere.</small>
+        <small>{formatNumber(model.totalFloorSlots)} gulvplasser mot {formatNumber(model.requiredFloorSlots)} nødvendige gulvplasser etter stabling.</small>
       </div>
       {model.scenarioRows.map((row) => (
         <div className="constraint-card" key={row.key}>
           <span>{row.label}</span>
           <strong>{row.limiting.label}</strong>
-          <small>{row.perContainer} stk/container · {row.limiting.hint}</small>
+          <small>{row.containerChoice.shortLabel} · {row.perContainer} stk/container · {row.stackLevels} nivåer · {row.limiting.hint}</small>
         </div>
       ))}
     </section>
@@ -618,41 +661,44 @@ function getFit(container, size, orientationMode = "auto") {
   return { compatible: false, physicalCount: 0, footprint, reason: "Fotavtrykk passer ikke i valgt container" };
 }
 
-function buildContainerQueue(scenarioRows, totalContainerSlots) {
+function buildFloorStackQueue(scenarioRows, totalFloorSlots) {
   const queue = [];
   for (const row of scenarioRows) {
     if (!Number.isFinite(row.containersNeeded) || row.perContainer <= 0) continue;
-    const count = Math.min(row.containersNeeded, totalContainerSlots - queue.length);
-    for (let index = 0; index < count; index += 1) queue.push(row);
-    if (queue.length >= totalContainerSlots) break;
+    let remaining = row.containersNeeded;
+    while (remaining > 0 && queue.length < totalFloorSlots) {
+      const stackCount = Math.min(row.stackLevels, remaining);
+      queue.push({ load: row, stackCount });
+      remaining -= stackCount;
+    }
+    if (queue.length >= totalFloorSlots) break;
   }
   return queue;
 }
 
-function buildRoomVisualSlots({ room, container, containerPlacement, containerRotated, levels, wallClearance, aisleGap, visualQueue, offset }) {
+function buildRoomVisualSlots({ room, container, containerPlacement, containerRotated, wallClearance, aisleGap, visualQueue, offset }) {
   const slots = [];
   let nextOffset = offset;
   for (let col = 0; col < room.cols; col += 1) {
     for (let row = 0; row < room.rows; row += 1) {
       if (slots.length >= room.floorSlots) break;
-      const stackLoads = visualQueue.slice(nextOffset, nextOffset + levels);
-      nextOffset += levels;
-      const load = stackLoads[0] || null;
-      const stackKeys = new Set(stackLoads.map((stackLoad) => stackLoad.key));
+      const stack = visualQueue[nextOffset] || null;
+      nextOffset += 1;
+      const load = stack?.load || null;
       const xMeters = wallClearance + row * (containerPlacement.width + aisleGap);
       const yFromBottom = wallClearance + col * (containerPlacement.length + aisleGap);
       const topMeters = room.displayLength - yFromBottom - containerPlacement.length;
       slots.push({
         key: `${room.key}-${col}-${row}`,
         load,
-        stackCount: stackLoads.length,
-        mixed: stackKeys.size > 1,
+        stackCount: stack?.stackCount || 0,
+        mixed: false,
         leftPct: (xMeters / room.width) * 100,
         topPct: (Math.max(0, topMeters) / room.displayLength) * 100,
         widthPct: (containerPlacement.width / room.width) * 100,
         heightPct: (containerPlacement.length / room.displayLength) * 100,
         title: load
-          ? `${container.label}${containerRotated ? " · 90° i lageret" : ""}: ${load.perContainer} ${load.label.toLowerCase()} per container, ${stackLoads.length} nivå(er)`
+          ? `${load.containerChoice.label}${containerRotated ? " · 90° i lageret" : ""}: ${load.perContainer} ${load.label.toLowerCase()} per container, ${stack.stackCount} nivå(er)`
           : `${container.label}${containerRotated ? " · 90° i lageret" : ""}: ledig plass`
       });
     }
@@ -709,10 +755,11 @@ function getLimitingConstraint({ fit, packingLimited, weightLimited, doseLimited
   return limiting;
 }
 
-function buildWarnings({ model, stackLimit, drumWeight, steelWeight }) {
+function buildWarnings({ model, stackLimit, halfHeightStackLimit, drumWeight, steelWeight }) {
   const warnings = [];
-  if (model.mixedCoverage < 1) warnings.push({ level: "critical", text: `Blandet scenario mangler ca. ${formatNumber(model.requiredContainers - model.totalContainerSlots)} containerplasser.` });
+  if (model.mixedCoverage < 1) warnings.push({ level: "critical", text: `Blandet scenario mangler ca. ${formatNumber(model.requiredFloorSlots - model.totalFloorSlots)} gulvplasser etter stabling.` });
   if (stackLimit > 4) warnings.push({ level: "warn", text: "5 i høyden er kun testmodus. Nederste kasse/container må kontrolleres for trykkbelastning." });
+  if (halfHeightStackLimit > 6) warnings.push({ level: "warn", text: "Mer enn 6 half-height-containere i høyden er testmodus. Stablelast og løfteoperasjon må verifiseres." });
   if (drumWeight > 330) warnings.push({ level: "critical", text: "Tønnevekt overstiger 330 kg UN-/spesifikasjonsgrensen fra rapporten." });
   if (steelWeight > 2500) warnings.push({ level: "warn", text: "Stålkassevekt overstiger 2500 kg truckgrense. Alternativ løftemetode må vurderes." });
   if (steelWeight > 3000) warnings.push({ level: "critical", text: "Stålkassevekt overstiger antatt 3000 kg stålkassegrense." });
@@ -720,6 +767,7 @@ function buildWarnings({ model, stackLimit, drumWeight, steelWeight }) {
   for (const row of model.scenarioRows) {
     if (row.perContainer === 0) warnings.push({ level: "critical", text: `${row.label} kan ikke pakkes med gjeldende container, mål, vekt- eller dosegrense.` });
     else if (row.packageDose > 2) warnings.push({ level: "warn", text: `${row.label} har dose over 2 mSv/h per kolli og bør håndteres særskilt.` });
+    if (row.key === "drum210" && row.heightKind === "half") warnings.push({ level: "warn", text: "210L-tønne i half-height har bare ca. 3 mm nominell høydeklaring. Toleranser og innlastingsmetode må verifiseres før løsningen regnes som gjennomførbar." });
   }
   if (warnings.length === 0) warnings.push({ level: "ok", text: "Ingen åpenbare brudd med gjeldende simuleringsgrenser." });
   return warnings;
@@ -741,9 +789,14 @@ function Segmented({ options, value, onChange }) {
     <div className="segments">
       {Object.entries(options).map(([key, option]) => {
         const hasDimensions = typeof option.length === "number";
+        const familyRegular = option.regularKey ? containerTypes[option.regularKey] : null;
+        const familyHalf = option.halfKey ? containerTypes[option.halfKey] : null;
+        const describeContainer = (container) => `utvendig ${container.length.toFixed(2)} x ${container.width.toFixed(2)} x ${container.height.toFixed(2)} m, innvendig ${container.usableLength.toFixed(2)} x ${container.usableWidth.toFixed(2)} x ${container.usableHeight.toFixed(2)} m`;
         const dimensionText = hasDimensions
           ? `Utvendige mål: ${option.length.toFixed(2)} x ${option.width.toFixed(2)} x ${option.height.toFixed(2)} m. Innvendig nyttemål: ${option.usableLength.toFixed(2)} x ${option.usableWidth.toFixed(2)} x ${option.usableHeight.toFixed(2)} m.`
-          : "";
+          : familyRegular
+            ? `Normal: ${describeContainer(familyRegular)}.${familyHalf ? ` Half-height: ${describeContainer(familyHalf)}.` : " Half-height er ikke aktivert."}`
+            : "";
         return (
           <button
             key={key}
@@ -753,7 +806,7 @@ function Segmented({ options, value, onChange }) {
             type="button"
           >
             <span>{option.shortLabel || option.label}</span>
-            {hasDimensions && <small className="segment-info">{dimensionText}</small>}
+            {(hasDimensions || familyRegular) && <small className="segment-info">{dimensionText}</small>}
           </button>
         );
       })}
