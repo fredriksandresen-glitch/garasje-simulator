@@ -528,10 +528,12 @@ function ContainerFootprint({ model, slot }) {
           {Array.from({ length: Math.min(load.perContainer, 24) }).map((_, index) => (
             <span
               key={`${slot.key}-load-${index}`}
-              className={`payload-symbol ${load.shareKey}`}
+              className={`payload-symbol ${load.shareKey} ${load.key}`}
               title={`${load.shortLabel}: ${load.dimensions}`}
               style={getPayloadStyle({ load, container: model.container, index })}
-            />
+            >
+              {load.shareKey === "steel" ? load.shortLabel : null}
+            </span>
           ))}
         </div>
       ) : <span className="empty-label">ledig</span>}
