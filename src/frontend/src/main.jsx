@@ -193,9 +193,79 @@ function usePersistentState(key, initialValue) {
 }
 
 const rooms = [
-  { key: "lager1", label: "Lager 1", x: 0, width: 16.85, baseLength: 24.115, usableLength: 22.015, obstructionArea: 4.85 * 1.8 },
-  { key: "lager2", label: "Lager 2", x: 16.85 + separatorWidth, width: 16.85, usableLength: 29, extendedLength: 34, obstructionArea: 5.15 * 11.985 }
+  {
+    key: "lager1",
+    label: "Lager 1",
+    x: 0,
+    width: 16.85,
+    baseLength: 24.115,
+    usableLength: 22.015,
+    obstructions: [
+      { key: "personsluse1", label: "Personsluse 1", x: 16.85 - 4.85, y: 24.115 - 1.8, width: 4.85, length: 1.8, type: "yellow" }
+    ]
+  },
+  {
+    key: "lager2",
+    label: "Lager 2",
+    x: 16.85 + separatorWidth,
+    width: 16.85,
+    usableLength: 29,
+    extendedLength: 34,
+    obstructions: [
+      { key: "forrom-sluse", label: "Forrom / sluse", x: 0, y: 34 - 11.985, width: 5.15, length: 11.985, type: "yellow" }
+    ],
+    extension: { key: "rosa-felt", label: "Rosa felt", x: 0, y: 29, width: 16.85, length: 5, type: "pink" }
+  }
 ];
+
+function rectanglesOverlap(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.length &&
+    a.y + a.length > b.y
+  );
+}
+
+function rectangleIntersectionArea(a, b) {
+  const overlapWidth = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const overlapLength = Math.max(0, Math.min(a.y + a.length, b.y + b.length) - Math.max(a.y, b.y));
+  return overlapWidth * overlapLength;
+}
+
+function buildRoomSlotGrid({ room, storageLength, containerPlacement, wallClearance, doorClearance, aisleGap, includeMarkedAreas }) {
+  const footprint = { length: containerPlacement.length + aisleGap, width: containerPlacement.width + aisleGap };
+  const clearWidth = Math.max(0, room.width - wallClearance * 2);
+  const clearLength = Math.max(0, storageLength - doorClearance);
+  const cols = Math.max(0, Math.floor(clearLength / footprint.length));
+  const rows = Math.max(0, Math.floor(clearWidth / footprint.width));
+  const slots = [];
+
+  for (let col = 0; col < cols; col += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      const rectangle = {
+        x: wallClearance + row * footprint.width,
+        y: wallClearance + col * footprint.length,
+        width: containerPlacement.width,
+        length: containerPlacement.length
+      };
+      const blockedBy = (room.obstructions || []).find((obstruction) => rectanglesOverlap(rectangle, obstruction)) || null;
+      slots.push({
+        key: `${room.key}-${col}-${row}`,
+        ...rectangle,
+        blockedBy,
+        blocked: !includeMarkedAreas && Boolean(blockedBy)
+      });
+    }
+  }
+
+  const clearArea = { x: wallClearance, y: wallClearance, width: clearWidth, length: clearLength };
+  const obstructedArea = includeMarkedAreas
+    ? 0
+    : (room.obstructions || []).reduce((sum, obstruction) => sum + rectangleIntersectionArea(clearArea, obstruction), 0);
+
+  return { slots, cols, rows, clearWidth, clearLength, effectiveArea: Math.max(0, clearWidth * clearLength - obstructedArea) };
+}
 
 function App() {
   const [planningMode, setPlanningMode] = usePersistentState("planningMode", "scenario");
@@ -241,7 +311,6 @@ function App() {
     const containerPlacement = rotateContainers
       ? { length: container.width, width: container.length }
       : { length: container.length, width: container.width };
-    const footprint = { length: containerPlacement.length + aisleGap, width: containerPlacement.width + aisleGap };
     const maxLevelsForHeight = Math.max(1, Math.floor(heightLimit / container.height));
     const levels = Math.max(1, Math.min(stackLimit, maxLevelsForHeight));
     const maxHalfLevelsForHeight = halfContainer ? Math.max(1, Math.floor(heightLimit / halfContainer.height)) : 0;
@@ -252,23 +321,27 @@ function App() {
     const roomModels = rooms.map((room) => {
       const storageLength = room.key === "lager2" && useLager2Extension ? room.extendedLength : room.usableLength;
       const displayLength = room.key === "lager1" ? room.baseLength : room.extendedLength;
-      const clearWidth = Math.max(0, room.width - wallClearance * 2);
-      const clearLength = Math.max(0, storageLength - doorClearance);
-      const cols = Math.max(0, Math.floor(clearLength / footprint.length));
-      const rows = Math.max(0, Math.floor(clearWidth / footprint.width));
-      const obstructionSlots = includeMarkedAreas ? 0 : Math.ceil(room.obstructionArea / (footprint.length * footprint.width));
-      const floorSlots = Math.max(0, cols * rows - obstructionSlots);
+      const grid = buildRoomSlotGrid({ room, storageLength, containerPlacement, wallClearance, doorClearance, aisleGap, includeMarkedAreas });
+      const blockedSlots = grid.slots.filter((slot) => slot.blocked);
+      const availableSlots = grid.slots.filter((slot) => !slot.blocked);
+      const floorSlots = availableSlots.length;
       return {
         ...room,
         storageLength,
         displayLength,
-        cols,
-        rows,
+        cols: grid.cols,
+        rows: grid.rows,
+        geometricSlots: grid.slots,
+        grossSlots: grid.slots.length,
+        blockedSlots,
+        availableSlots,
         floorSlots,
         totalSlots: floorSlots,
         wallClearance,
         doorClearance,
-        effectiveArea: clearWidth * clearLength - (includeMarkedAreas ? 0 : room.obstructionArea),
+        includeMarkedAreas,
+        useLager2Extension,
+        effectiveArea: grid.effectiveArea,
         leftPct: (room.x / planWidth) * 100,
         topPct: ((planLength - displayLength) / planLength) * 100,
         widthPct: (room.width / planWidth) * 100,
@@ -382,10 +455,7 @@ function App() {
       const { slots, nextOffset } = buildRoomVisualSlots({
         room,
         container,
-        containerPlacement,
         containerRotated: rotateContainers,
-        wallClearance,
-        aisleGap,
         visualQueue,
         offset: visualOffset
       });
@@ -665,8 +735,6 @@ function App() {
 }
 
 function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
-  const markedClass = includeMarkedAreas ? "blocked included" : "blocked excluded";
-  const markedStatus = includeMarkedAreas ? "inkludert" : "fratrukket";
   return (
     <div className="plan-shell">
       <div className="plan-canvas" style={{ aspectRatio: `${model.planWidth} / ${model.planLength}` }}>
@@ -674,11 +742,6 @@ function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
         <div className="dimension dimension-height">Lager 2: {model.planLength.toFixed(0)} m</div>
         {model.roomModels.map((room) => <PlanRoom key={room.key} room={room} model={model} />)}
         <div className="separator" style={{ left: `${(16.85 / model.planWidth) * 100}%`, width: `${(separatorWidth / model.planWidth) * 100}%` }} />
-        <div className={`${markedClass} blocked-l1`}>Personsluse 1<br />4.85 x 1.8 m<br />{markedStatus}</div>
-        <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 11.99 m<br />{markedStatus}</div>
-        <div className={useLager2Extension ? "extension-label included" : "extension-label excluded"}>
-          Rosa felt<br />17.15 x 5.00 m<br />{useLager2Extension ? "inkludert" : "fratrukket"}
-        </div>
       </div>
       <div className="plan-legend">
         <span><i className="legend-storage" />Lagerareal</span>
@@ -706,10 +769,37 @@ function PlanRoom({ room, model }) {
           bottom: `${(room.wallClearance / room.displayLength) * 100}%`
         }}
       />
+      {(room.obstructions || []).map((obstruction) => (
+        <div
+          className={`room-obstruction ${room.includeMarkedAreas ? "included" : "excluded"}`}
+          key={obstruction.key}
+          style={{
+            left: `${(obstruction.x / room.width) * 100}%`,
+            top: `${((room.displayLength - obstruction.y - obstruction.length) / room.displayLength) * 100}%`,
+            width: `${(obstruction.width / room.width) * 100}%`,
+            height: `${(obstruction.length / room.displayLength) * 100}%`
+          }}
+        >
+          {obstruction.label}<br />{obstruction.width.toFixed(2)} x {obstruction.length.toFixed(2)} m<br />{room.includeMarkedAreas ? "inkludert" : "fratrukket"}
+        </div>
+      ))}
+      {room.extension && (
+        <div
+          className={`room-extension ${room.useLager2Extension ? "included" : "excluded"}`}
+          style={{
+            left: `${(room.extension.x / room.width) * 100}%`,
+            top: `${((room.displayLength - room.extension.y - room.extension.length) / room.displayLength) * 100}%`,
+            width: `${(room.extension.width / room.width) * 100}%`,
+            height: `${(room.extension.length / room.displayLength) * 100}%`
+          }}
+        >
+          {room.extension.label}<br />{room.useLager2Extension ? "inkludert" : "fratrukket"}
+        </div>
+      )}
       <div className="container-layer">
         {room.visualSlots.map((slot) => <ContainerFootprint key={slot.key} model={model} slot={slot} />)}
       </div>
-      <div className="plan-room-footer">{room.totalSlots} gulvplasser · {room.rows} rader x {room.cols} lengder</div>
+      <div className="plan-room-footer">{room.grossSlots} brutto · {room.blockedSlots.length} blokkert = {room.floorSlots} gulvplasser</div>
     </article>
   );
 }
@@ -721,15 +811,15 @@ function ContainerFootprint({ model, slot }) {
   const containerClass = renderedContainer.height < 1.2 ? "half-height" : renderedContainer.length < 4 ? "iso10" : "iso20";
   return (
     <div
-      className={`container-footprint ${containerClass} ${loadClass} ${slot.mixed ? "mixed-stack" : ""}`}
+      className={`container-footprint ${containerClass} ${loadClass} ${slot.blocked ? "slot-blocked" : ""} ${slot.mixed ? "mixed-stack" : ""}`}
       style={{ left: `${slot.leftPct}%`, top: `${slot.topPct}%`, width: `${slot.widthPct}%`, height: `${slot.heightPct}%` }}
       title={slot.title}
     >
       <div className="container-label">
-        <span>{renderedContainer.label}{model.containerRotated ? " · 90°" : ""}</span>
+        <span>{slot.blocked ? "Blokkert plass" : `${renderedContainer.label}${model.containerRotated ? " · 90°" : ""}`}</span>
         {slot.stackCount > 1 && <strong>x{slot.stackCount}</strong>}
       </div>
-      {load ? (
+      {slot.blocked ? <span className="empty-label">blokkeres av slusefelt</span> : load ? (
         <div className="payload-layer">
           {Array.from({ length: Math.min(slot.packageCount ?? load.perContainer, 24) }).map((_, index) => (
             <span
@@ -820,33 +910,30 @@ function buildFloorStackQueue(scenarioRows, totalFloorSlots) {
   return queue;
 }
 
-function buildRoomVisualSlots({ room, container, containerPlacement, containerRotated, wallClearance, aisleGap, visualQueue, offset }) {
+function buildRoomVisualSlots({ room, container, containerRotated, visualQueue, offset }) {
   const slots = [];
   let nextOffset = offset;
-  for (let col = 0; col < room.cols; col += 1) {
-    for (let row = 0; row < room.rows; row += 1) {
-      if (slots.length >= room.floorSlots) break;
-      const stack = visualQueue[nextOffset] || null;
-      nextOffset += 1;
-      const load = stack?.load || null;
-      const xMeters = wallClearance + row * (containerPlacement.width + aisleGap);
-      const yFromBottom = wallClearance + col * (containerPlacement.length + aisleGap);
-      const topMeters = room.displayLength - yFromBottom - containerPlacement.length;
-      slots.push({
-        key: `${room.key}-${col}-${row}`,
-        load,
-        stackCount: stack?.stackCount || 0,
-        packageCount: stack?.packageCount || 0,
-        mixed: false,
-        leftPct: (xMeters / room.width) * 100,
-        topPct: (Math.max(0, topMeters) / room.displayLength) * 100,
-        widthPct: (containerPlacement.width / room.width) * 100,
-        heightPct: (containerPlacement.length / room.displayLength) * 100,
-        title: load
+  for (const geometricSlot of room.geometricSlots) {
+    const stack = geometricSlot.blocked ? null : visualQueue[nextOffset] || null;
+    if (!geometricSlot.blocked) nextOffset += 1;
+    const load = stack?.load || null;
+    const topMeters = room.displayLength - geometricSlot.y - geometricSlot.length;
+    slots.push({
+      ...geometricSlot,
+      load,
+      stackCount: stack?.stackCount || 0,
+      packageCount: stack?.packageCount || 0,
+      mixed: false,
+      leftPct: (geometricSlot.x / room.width) * 100,
+      topPct: (Math.max(0, topMeters) / room.displayLength) * 100,
+      widthPct: (geometricSlot.width / room.width) * 100,
+      heightPct: (geometricSlot.length / room.displayLength) * 100,
+      title: geometricSlot.blocked
+        ? `${container.label}: blokkeres av ${geometricSlot.blockedBy.label.toLowerCase()}`
+        : load
           ? `${load.containerChoice.label}${containerRotated ? " · 90° i lageret" : ""}: ${stack.packageCount} ${load.label.toLowerCase()} i vist container, ${stack.stackCount} nivå(er)`
           : `${container.label}${containerRotated ? " · 90° i lageret" : ""}: ledig plass`
-      });
-    }
+    });
   }
   return { slots, nextOffset };
 }
