@@ -568,7 +568,7 @@ function App() {
             <p className="eyebrow">Lagerbygg III</p>
             <h1>Radioaktivt avfall: lager- og containersimulator</h1>
           </div>
-          <div className={model.mixedCoverage >= 1 ? "score good" : "score warn"}>
+          {planningMode !== "study" && <div className={model.mixedCoverage >= 1 ? "score good" : "score warn"}>
             <div className="score-label">
               {planningMode === "custom" ? "Lastdekning" : "Scenario dekning"}
               <span className="info-dot" tabIndex="0">
@@ -577,14 +577,16 @@ function App() {
               </span>
             </div>
             <div className="score-value"><Gauge size={20} /><span>{Math.round(model.mixedCoverage * 100)}%</span></div>
-          </div>
+          </div>}
         </header>
 
         <nav className="mode-tabs" aria-label="Planleggingsmodus">
           <button type="button" className={planningMode === "scenario" ? "active" : ""} onClick={() => setPlanningMode("scenario")}>Scenario</button>
           <button type="button" className={planningMode === "custom" ? "active" : ""} onClick={() => setPlanningMode("custom")}>Fri lastkombinasjon</button>
+          <button type="button" className={planningMode === "study" ? "active" : ""} onClick={() => setPlanningMode("study")}>Containerstudie</button>
         </nav>
 
+        {planningMode === "study" ? <ContainerStudy /> : <>
         <section className="summary-grid">
           <SummaryCard icon={<Warehouse />} label="Lagerkapasitet" value={model.totalFloorSlots} unit="gulvplasser" />
           <SummaryCard icon={<Boxes />} label="Blandet behov" value={model.requiredFloorSlots} unit="gulvplasser" />
@@ -729,10 +731,169 @@ function App() {
             <section className="warnings" aria-label="Begrensninger">{warnings.map((warning) => <div className={`warning ${warning.level}`} key={warning.text}><AlertTriangle size={17} /><span>{warning.text}</span></div>)}</section>
           </section>
         </div>
+        </>}
       </section>
     </main>
   );
 }
+
+const studyContainerOptions = {
+  iso10: containerTypes.iso10,
+  iso10hh: containerTypes.iso10hh,
+  iso15: containerTypes.iso15,
+  iso15hh: containerTypes.iso15hh,
+  iso20: containerTypes.iso20
+};
+
+const studyOrientationOptions = {
+  auto: { label: "Auto" },
+  straight: { label: "Standard" },
+  rotated: { label: "90° rotert" }
+};
+
+function evaluatePackingOrientation(container, load, orientation, spacing) {
+  const itemLength = orientation === "rotated" ? load.size.width : load.size.length;
+  const itemWidth = orientation === "rotated" ? load.size.length : load.size.width;
+  const itemHeight = load.size.height;
+  const rows = Math.max(0, Math.floor((container.usableLength + spacing) / (itemLength + spacing)));
+  const cols = Math.max(0, Math.floor((container.usableWidth + spacing) / (itemWidth + spacing)));
+  const heightFits = itemHeight <= container.usableHeight;
+  const count = heightFits ? rows * cols : 0;
+  const usedLength = rows > 0 ? rows * itemLength + Math.max(0, rows - 1) * spacing : itemLength;
+  const usedWidth = cols > 0 ? cols * itemWidth + Math.max(0, cols - 1) * spacing : itemWidth;
+  const clearanceLength = container.usableLength - usedLength;
+  const clearanceWidth = container.usableWidth - usedWidth;
+  const clearanceHeight = container.usableHeight - itemHeight;
+
+  return {
+    orientation,
+    itemLength,
+    itemWidth,
+    itemHeight,
+    rows,
+    cols,
+    count,
+    usedLength,
+    usedWidth,
+    usedHeight: itemHeight,
+    clearanceLength,
+    clearanceWidth,
+    clearanceHeight,
+    practicalMargin: Math.min(clearanceLength, clearanceWidth)
+  };
+}
+
+function getPackingStudy(container, load, orientationMode = "auto", spacing = 0.05) {
+  const candidates = (orientationMode === "auto" ? ["straight", "rotated"] : [orientationMode])
+    .map((orientation) => evaluatePackingOrientation(container, load, orientation, spacing));
+  const selected = candidates.reduce((best, candidate) => {
+    if (!best || candidate.count > best.count) return candidate;
+    if (candidate.count < best.count) return best;
+    if (candidate.practicalMargin > best.practicalMargin) return candidate;
+    return best;
+  }, null);
+  const heightFails = selected.itemHeight > container.usableHeight;
+  const lengthFails = selected.itemLength > container.usableLength;
+  const widthFails = selected.itemWidth > container.usableWidth;
+  const failures = [heightFails && "høyde", lengthFails && "lengde", widthFails && "bredde"].filter(Boolean);
+  const compatible = selected.count > 0;
+  const floorArea = container.usableLength * container.usableWidth;
+  const volume = floorArea * container.usableHeight;
+  const loadFloorArea = selected.count * selected.itemLength * selected.itemWidth;
+  const loadVolume = loadFloorArea * selected.itemHeight;
+
+  return {
+    compatible,
+    selectedOrientation: selected.orientation,
+    cols: selected.cols,
+    rows: selected.rows,
+    count: selected.count,
+    usedLength: selected.usedLength,
+    usedWidth: selected.usedWidth,
+    usedHeight: selected.usedHeight,
+    clearanceLength: selected.clearanceLength,
+    clearanceWidth: selected.clearanceWidth,
+    clearanceHeight: selected.clearanceHeight,
+    lengthClearancePerSide: selected.clearanceLength / 2,
+    widthClearancePerSide: selected.clearanceWidth / 2,
+    heightClearanceTop: selected.clearanceHeight,
+    itemLength: selected.itemLength,
+    itemWidth: selected.itemWidth,
+    floorAreaUtilization: compatible ? (loadFloorArea / floorArea) * 100 : 0,
+    volumeUtilization: compatible ? (loadVolume / volume) * 100 : 0,
+    criticalClearance: compatible ? Math.min(selected.clearanceLength, selected.clearanceWidth, selected.clearanceHeight) : Math.min(selected.clearanceLength, selected.clearanceWidth, selected.clearanceHeight),
+    reason: compatible ? "Lasten passer innenfor containerens innvendige mål." : `Passer ikke på grunn av ${failures.length ? failures.join(" og ") : "tilgjengelig pakkeflate"}.`
+  };
+}
+
+function ContainerStudy() {
+  const [studyContainerKey, setStudyContainerKey] = usePersistentState("studyContainer", "iso10");
+  const [studyLoadKey, setStudyLoadKey] = usePersistentState("studyLoad", "steel1");
+  const [studyOrientation, setStudyOrientation] = usePersistentState("studyOrientation", "auto");
+  const [studySpacing, setStudySpacing] = usePersistentState("studySpacing", 0.05);
+  const container = studyContainerOptions[studyContainerKey] || containerTypes.iso10;
+  const load = loadTypes[studyLoadKey] || loadTypes.steel1;
+  const result = useMemo(() => getPackingStudy(container, load, studyOrientation, studySpacing), [container, load, studyOrientation, studySpacing]);
+  const isTight = result.compatible && result.criticalClearance < 0.05;
+
+  return (
+    <section className="container-study dark-study">
+      <div className="study-heading">
+        <div><p className="eyebrow">Ren pakkestudie</p><h2>Last i container</h2><p>Innvendige containermål, kollimål og praktiske klaringer – helt uavhengig av lagerbygget.</p></div>
+        <div className={`study-status ${result.compatible ? "fits" : "fails"}`}>{result.compatible ? "Passer" : "Passer ikke"}</div>
+      </div>
+
+      <div className="study-layout">
+        <aside className="study-controls">
+          <label className="study-field"><span>Container</span><select value={studyContainerKey} onChange={(event) => setStudyContainerKey(event.target.value)}>{Object.entries(studyContainerOptions).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+          <label className="study-field"><span>Lasttype</span><select value={studyLoadKey} onChange={(event) => setStudyLoadKey(event.target.value)}>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+          <div className="study-field"><span>Orientering</span><div className="study-segments">{Object.entries(studyOrientationOptions).map(([key, item]) => <button type="button" key={key} className={studyOrientation === key ? "active" : ""} onClick={() => setStudyOrientation(key)}>{item.label}</button>)}</div></div>
+          <label className="study-field study-slider"><span><span>Avstand mellom kolli</span><strong>{studySpacing.toFixed(2)} m</strong></span><input type="range" min="0" max="0.5" step="0.01" value={studySpacing} onChange={(event) => setStudySpacing(Number(event.target.value))} /></label>
+          <div className="study-dimensions">
+            <span>Innvendig container</span><strong>L {container.usableLength.toFixed(3)} × B {container.usableWidth.toFixed(3)} × H {container.usableHeight.toFixed(3)} m</strong>
+            <span>Lastmål</span><strong>L {load.size.length.toFixed(3)} × B {load.size.width.toFixed(3)} × H {load.size.height.toFixed(3)} m</strong>
+          </div>
+        </aside>
+
+        <div className="study-visual-panel">
+          <Container3DView container={container} load={load} result={result} spacing={studySpacing} />
+          <div className="study-axis"><span>L {container.usableLength.toFixed(3)} m</span><span>B {container.usableWidth.toFixed(3)} m</span><span>H {container.usableHeight.toFixed(3)} m</span></div>
+        </div>
+      </div>
+
+      <div className="study-results">
+        <article><span>Antall</span><strong>{result.count} stk</strong><small>{result.rows} rader × {result.cols} kolonner</small></article>
+        <article><span>Valgt orientering</span><strong>{result.selectedOrientation === "rotated" ? "90° rotert" : "Standard"}</strong><small>{studyOrientation === "auto" ? "valgt automatisk" : "valgt manuelt"}</small></article>
+        <article><span>Gulvareal</span><strong>{(result.count * result.itemLength * result.itemWidth).toFixed(2)} m²</strong><small>{result.floorAreaUtilization.toFixed(1)} % utnyttelse</small></article>
+        <article><span>Volumutnyttelse</span><strong>{result.volumeUtilization.toFixed(1)} %</strong><small>av innvendig volum</small></article>
+        <article className={isTight ? "tight" : ""}><span>Kritisk minste klaring</span><strong>{formatStudyMeasure(result.criticalClearance)}</strong><small>{result.compatible ? "total restklaring" : "negativ verdi betyr konflikt"}</small></article>
+      </div>
+
+      <ClearancePanel result={result} isTight={isTight} />
+    </section>
+  );
+}
+
+function Container3DView({ container, load, result, spacing }) {
+  const items = [];
+  if (result.compatible) {
+    for (let row = 0; row < result.rows; row += 1) {
+      for (let col = 0; col < result.cols; col += 1) {
+        const leftMeters = result.widthClearancePerSide + col * (result.itemWidth + spacing);
+        const topMeters = result.lengthClearancePerSide + row * (result.itemLength + spacing);
+        items.push(<div key={`${row}-${col}`} className={`study-cargo ${load.packKey === "drum" ? "barrel" : "box"}`} style={{ left: `${(leftMeters / container.usableWidth) * 100}%`, top: `${(topMeters / container.usableLength) * 100}%`, width: `${(result.itemWidth / container.usableWidth) * 100}%`, height: `${(result.itemLength / container.usableLength) * 100}%` }}><span>{load.shortLabel}</span></div>);
+      }
+    }
+  }
+  return <div className={`study-scene ${result.compatible ? "" : "incompatible"}`}><div className="study-container-box"><div className="study-wall back" /><div className="study-wall side" /><div className="study-floor">{items}</div><div className="study-frame-label">transparent innvendig volum</div>{!result.compatible && <div className="study-no-fit"><AlertTriangle size={26} /><strong>Passer ikke</strong><span>{result.reason}</span></div>}</div></div>;
+}
+
+function ClearancePanel({ result, isTight }) {
+  return <section className={`clearance-panel ${!result.compatible ? "incompatible" : ""}`}><div><h3>Klaringer</h3><p>{result.reason}</p></div>{result.compatible && <div className="clearance-grid"><ClearanceValue label="Lengde total" value={result.clearanceLength} /><ClearanceValue label="Lengde per ende" value={result.lengthClearancePerSide} /><ClearanceValue label="Bredde total" value={result.clearanceWidth} /><ClearanceValue label="Bredde per side" value={result.widthClearancePerSide} /><ClearanceValue label="Høyde over last" value={result.heightClearanceTop} /></div>}{isTight && <div className="tight-warning"><AlertTriangle size={18} />Trang klaring – må verifiseres mot faktisk container og innlastingsmetode.</div>}</section>;
+}
+
+function ClearanceValue({ label, value }) { return <div className={value < 0.05 ? "tight" : ""}><span>{label}</span><strong>{formatStudyMeasure(value)}</strong></div>; }
+function formatStudyMeasure(value) { return `${value.toFixed(3)} m / ${Math.round(value * 1000)} mm`; }
 
 function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
   return (
