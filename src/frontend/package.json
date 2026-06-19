@@ -3,19 +3,22 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "npm@11.4.1",
+  "packageManager": "pnpm@11.0.7",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
     "@vitejs/plugin-react": "^4.4.1",
-    "vite": "^6.3.5",
-    "typescript": "^5.8.3",
+    "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "lucide-react": "^0.468.0"
+    "three": "^0.184.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
   },
   "devDependencies": {}
 }

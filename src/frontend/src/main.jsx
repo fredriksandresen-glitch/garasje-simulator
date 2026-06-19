@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertTriangle,
@@ -18,6 +18,8 @@ import {
   X
 } from "lucide-react";
 import "./styles.css";
+
+const Container3DScene = lazy(() => import("./Container3DView.jsx"));
 
 const loadTypes = {
   drum210: {
@@ -875,17 +877,26 @@ function ContainerStudy() {
 }
 
 function Container3DView({ container, load, result, spacing }) {
-  const items = [];
-  if (result.compatible) {
-    for (let row = 0; row < result.rows; row += 1) {
-      for (let col = 0; col < result.cols; col += 1) {
-        const leftMeters = result.widthClearancePerSide + col * (result.itemWidth + spacing);
-        const topMeters = result.lengthClearancePerSide + row * (result.itemLength + spacing);
-        items.push(<div key={`${row}-${col}`} className={`study-cargo ${load.packKey === "drum" ? "barrel" : "box"}`} style={{ left: `${(leftMeters / container.usableWidth) * 100}%`, top: `${(topMeters / container.usableLength) * 100}%`, width: `${(result.itemWidth / container.usableWidth) * 100}%`, height: `${(result.itemLength / container.usableLength) * 100}%` }}><span>{load.shortLabel}</span></div>);
-      }
-    }
-  }
-  return <div className={`study-scene ${result.compatible ? "" : "incompatible"}`}><div className="study-container-box"><div className="study-wall back" /><div className="study-wall side" /><div className="study-floor">{items}</div><div className="study-frame-label">transparent innvendig volum</div>{!result.compatible && <div className="study-no-fit"><AlertTriangle size={26} /><strong>Passer ikke</strong><span>{result.reason}</span></div>}</div></div>;
+  const resetKey = `${container.usableLength}-${container.usableHeight}-${load.packKey}-${result.selectedOrientation}`;
+
+  return (
+    <div className={`study-webgl ${result.compatible ? "" : "incompatible"}`}>
+      <ThreeErrorBoundary resetKey={resetKey}>
+        <Suspense fallback={<div className="study-webgl-fallback">Laster 3D-visning …</div>}>
+          <Container3DScene container={container} load={load} result={result} spacing={spacing} />
+        </Suspense>
+      </ThreeErrorBoundary>
+      <div className="study-view-hint">Dra for å rotere · rull for å zoome · høyreklikk for å panorere</div>
+      {!result.compatible && <div className="study-no-fit"><AlertTriangle size={26} /><strong>Passer ikke</strong><span>{result.reason}</span></div>}
+    </div>
+  );
+}
+
+class ThreeErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidUpdate(previousProps) { if (this.state.failed && previousProps.resetKey !== this.props.resetKey) this.setState({ failed: false }); }
+  render() { return this.state.failed ? <div className="study-webgl-fallback">3D-visning kunne ikke lastes. Klaringsdataene under er fortsatt gyldige.</div> : this.props.children; }
 }
 
 function ClearancePanel({ result, isTight }) {
