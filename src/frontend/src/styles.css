@@ -69,16 +69,23 @@ input[type="range"] { width: 100%; accent-color: #286b52; }
 .plan-shell { display: grid; gap: 10px; }
 .plan-canvas { position: relative; width: 100%; min-height: 560px; border: 1px solid #9ca79f; border-radius: 8px; background: linear-gradient(90deg, rgba(67,78,70,.1) 1px, transparent 1px), linear-gradient(rgba(67,78,70,.1) 1px, transparent 1px), #f2efe7; background-size: 26px 26px; overflow: hidden; }
 .plan-room { position: absolute; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; border: 2px solid #6f7a72; background: rgba(248,249,246,.82); padding: 10px; overflow: hidden; }
-.plan-room.lager2::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 14.7%; background: rgba(235,0,196,.22); border-bottom: 1px dashed #b1369d; pointer-events: none; }
 .plan-room-header, .plan-room-footer { position: relative; z-index: 2; display: flex; justify-content: space-between; gap: 8px; color: #243329; font-size: .85rem; font-weight: 850; }
 .plan-room-header span, .plan-room-footer { color: #5c665f; font-weight: 750; }
 .clearance-frame { position: absolute; z-index: 1; border: 1px dashed rgba(40,107,82,.38); background: rgba(255,255,255,.22); pointer-events: none; }
+.room-obstruction, .room-extension { position: absolute; z-index: 1; display: grid; place-items: center; border: 1px dashed; text-align: center; font-size: .68rem; font-weight: 850; line-height: 1.2; pointer-events: none; }
+.room-obstruction.excluded { border-color: #bc9b00; background: rgba(255,230,0,.42); color: #3c3500; }
+.room-obstruction.included { border-color: #6f8b26; background: rgba(234,244,132,.28); color: #40520d; }
+.room-extension { border-color: #b1369d; background: rgba(235,0,196,.18); color: #732065; }
+.room-extension.excluded { opacity: .48; }
 .container-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .container-footprint { position: absolute; min-width: 15px; min-height: 18px; border: 1px solid #46554c; border-radius: 3px; background: #e3e8e2; box-shadow: inset 0 0 0 2px rgba(255,255,255,.55), 0 2px 5px rgba(24,33,29,.16); overflow: hidden; }
 .container-footprint.iso20 { border-color: #364a43; }
 .container-footprint.iso10 { border-color: #426456; background: #e6eee9; }
 .container-footprint.half-height { border-color: #77633b; background: repeating-linear-gradient(135deg, #efe8d6 0 6px, #e4d8bd 6px 12px); }
 .container-footprint.load-empty { opacity: .34; background: rgba(255,255,255,.7); }
+.container-footprint.slot-blocked { z-index: 3; opacity: .82; border-color: #a65243; background: repeating-linear-gradient(135deg, rgba(255,230,0,.72) 0 6px, rgba(185,88,74,.58) 6px 12px); }
+.container-footprint.slot-blocked .container-label { color: #5f2017; }
+.container-footprint.slot-blocked .empty-label { color: #5f2017; }
 .container-footprint.mixed-stack { outline: 2px solid rgba(151,75,145,.5); }
 .container-label { position: absolute; inset: 2px 3px auto 3px; z-index: 3; display: flex; justify-content: space-between; gap: 2px; color: #16231d; font-size: clamp(.42rem, .62vw, .64rem); font-weight: 900; line-height: 1; text-transform: uppercase; }
 .container-label strong { border-radius: 999px; background: rgba(255,255,255,.76); padding: 1px 3px; font-size: .58em; }
@@ -93,12 +100,6 @@ input[type="range"] { width: 100%; accent-color: #286b52; }
 .payload-symbol.kokille { border-radius: 3px; background: #69a86b; }
 .empty-label { position: absolute; inset: auto 3px 3px; color: #6e7870; font-size: .52rem; font-weight: 800; text-align: center; }
 .separator { position: absolute; top: 0; bottom: 0; background: #768078; opacity: .55; }
-.blocked { position: absolute; z-index: 4; display: grid; place-items: center; border: 1px solid #bc9b00; background: rgba(255,230,0,.72); color: #3c3500; text-align: center; font-size: .74rem; font-weight: 900; line-height: 1.25; }
-.blocked.included { border-color: #6f8b26; background: rgba(234,244,132,.62); }
-.blocked.excluded { border-color: #bc9b00; background: rgba(255,230,0,.72); }
-.blocked-l1 { left: 34.8%; top: 29.1%; width: 14.2%; height: 5.3%; }
-.blocked-l2 { left: 50.7%; top: 0; width: 15.1%; height: 20.5%; }
-.extension-label { position: absolute; top: 8px; right: 9px; z-index: 5; max-width: 260px; border: 1px solid #c53baa; border-radius: 6px; background: rgba(255,230,251,.92); color: #732065; padding: 7px 9px; font-size: .78rem; font-weight: 850; }
 .dimension { position: absolute; z-index: 6; color: #25342b; font-size: .78rem; font-weight: 900; background: rgba(255,255,255,.82); border: 1px solid #cfd6d0; border-radius: 5px; padding: 4px 7px; }
 .dimension-width { left: 50%; bottom: 8px; transform: translateX(-50%); }
 .dimension-height { right: 8px; top: 50%; transform: translateY(-50%) rotate(90deg); transform-origin: center; }
@@ -139,4 +140,4 @@ input[type="range"] { width: 100%; accent-color: #286b52; }
 .warning.ok { border: 1px solid #4c8a68; background: #edf8f1; color: #20553a; }
 @media (max-width: 1200px) { .constraint-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1060px) { .workspace { grid-template-columns: 1fr; } .controls { max-height: none; position: static; } .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .plan-canvas { min-height: 460px; } }
-@media (max-width: 680px) { .app-shell { padding: 12px; } .topbar, .stage-header { display: grid; } .summary-grid, .segments, .constraint-panel { grid-template-columns: 1fr; } .table-row { grid-template-columns: 1fr; } h1 { font-size: 2.1rem; } .tooltip { right: auto; left: -120px; width: 240px; } .plan-canvas { min-height: 360px; } .plan-room-header, .plan-room-footer, .blocked, .dimension, .extension-label { font-size: .62rem; } }
+@media (max-width: 680px) { .app-shell { padding: 12px; } .topbar, .stage-header { display: grid; } .summary-grid, .segments, .constraint-panel { grid-template-columns: 1fr; } .table-row { grid-template-columns: 1fr; } h1 { font-size: 2.1rem; } .tooltip { right: auto; left: -120px; width: 240px; } .plan-canvas { min-height: 360px; } .plan-room-header, .plan-room-footer, .room-obstruction, .room-extension, .dimension { font-size: .62rem; } }
