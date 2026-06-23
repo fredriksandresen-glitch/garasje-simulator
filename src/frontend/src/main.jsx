@@ -747,11 +747,40 @@ const studyContainerOptions = {
   iso20: containerTypes.iso20
 };
 
+const customStudyContainerDefaults = {
+  usableLength: 4.38,
+  usableWidth: 2.35,
+  usableHeight: 2.39
+};
+
 const studyOrientationOptions = {
   auto: { label: "Auto" },
   straight: { label: "Standard" },
   rotated: { label: "90° rotert" }
 };
+
+function normalizeStudyDimension(value, fallback) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : fallback;
+}
+
+function buildCustomStudyContainer(customContainer) {
+  const usableLength = normalizeStudyDimension(customContainer.usableLength, customStudyContainerDefaults.usableLength);
+  const usableWidth = normalizeStudyDimension(customContainer.usableWidth, customStudyContainerDefaults.usableWidth);
+  const usableHeight = normalizeStudyDimension(customContainer.usableHeight, customStudyContainerDefaults.usableHeight);
+
+  return {
+    label: "Egendefinert container",
+    shortLabel: "Custom",
+    length: usableLength,
+    width: usableWidth,
+    height: usableHeight,
+    usableLength,
+    usableWidth,
+    usableHeight,
+    tare: 0
+  };
+}
 
 function evaluatePackingOrientation(container, load, orientation, spacing) {
   const itemLength = orientation === "rotated" ? load.size.width : load.size.length;
@@ -830,13 +859,16 @@ function getPackingStudy(container, load, orientationMode = "auto", spacing = 0.
 
 function ContainerStudy() {
   const [studyContainerKey, setStudyContainerKey] = usePersistentState("studyContainer", "iso10");
+  const [customStudyContainer, setCustomStudyContainer] = usePersistentState("customStudyContainer", customStudyContainerDefaults);
   const [studyLoadKey, setStudyLoadKey] = usePersistentState("studyLoad", "steel1");
   const [studyOrientation, setStudyOrientation] = usePersistentState("studyOrientation", "auto");
   const [studySpacing, setStudySpacing] = usePersistentState("studySpacing", 0.05);
-  const container = studyContainerOptions[studyContainerKey] || containerTypes.iso10;
+  const customContainer = useMemo(() => buildCustomStudyContainer(customStudyContainer), [customStudyContainer]);
+  const container = studyContainerKey === "custom" ? customContainer : studyContainerOptions[studyContainerKey] || containerTypes.iso10;
   const load = loadTypes[studyLoadKey] || loadTypes.steel1;
   const result = useMemo(() => getPackingStudy(container, load, studyOrientation, studySpacing), [container, load, studyOrientation, studySpacing]);
   const isTight = result.compatible && result.criticalClearance < 0.05;
+  const updateCustomDimension = (field, value) => setCustomStudyContainer((current) => ({ ...current, [field]: value }));
 
   return (
     <section className="container-study dark-study">
@@ -847,7 +879,13 @@ function ContainerStudy() {
 
       <div className="study-layout">
         <aside className="study-controls">
-          <label className="study-field"><span>Container</span><select value={studyContainerKey} onChange={(event) => setStudyContainerKey(event.target.value)}>{Object.entries(studyContainerOptions).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+          <label className="study-field"><span>Container</span><select value={studyContainerKey} onChange={(event) => setStudyContainerKey(event.target.value)}><option value="custom">Egendefinert container</option>{Object.entries(studyContainerOptions).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+          {studyContainerKey === "custom" && <div className="study-custom-container" aria-label="Egendefinerte innvendige containermål">
+            <span>Innvendige mål</span>
+            <label><small>Lengde (m)</small><input type="number" min="0.1" step="0.001" value={customStudyContainer.usableLength} onChange={(event) => updateCustomDimension("usableLength", event.target.value)} /></label>
+            <label><small>Bredde (m)</small><input type="number" min="0.1" step="0.001" value={customStudyContainer.usableWidth} onChange={(event) => updateCustomDimension("usableWidth", event.target.value)} /></label>
+            <label><small>Høyde (m)</small><input type="number" min="0.1" step="0.001" value={customStudyContainer.usableHeight} onChange={(event) => updateCustomDimension("usableHeight", event.target.value)} /></label>
+          </div>}
           <label className="study-field"><span>Lasttype</span><select value={studyLoadKey} onChange={(event) => setStudyLoadKey(event.target.value)}>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
           <div className="study-field"><span>Orientering</span><div className="study-segments">{Object.entries(studyOrientationOptions).map(([key, item]) => <button type="button" key={key} className={studyOrientation === key ? "active" : ""} onClick={() => setStudyOrientation(key)}>{item.label}</button>)}</div></div>
           <label className="study-field study-slider"><span><span>Avstand mellom kolli</span><strong>{studySpacing.toFixed(2)} m</strong></span><input type="range" min="0" max="0.5" step="0.01" value={studySpacing} onChange={(event) => setStudySpacing(Number(event.target.value))} /></label>
