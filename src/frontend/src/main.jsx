@@ -119,6 +119,25 @@ const containerTypes = {
     usableHeight: 2.390,
     tare: 1300
   },
+  algeco10htbk2: {
+    label: "10' Hard Top BK2",
+    shortLabel: "10' HT BK2",
+    length: 3.029,
+    width: 2.438,
+    height: 2.591,
+    usableLength: 2.900,
+    usableWidth: 2.350,
+    usableHeight: 2.251,
+    tare: 1350,
+    topOpeningWidth: 2.230,
+    payloadEstimateMin: 8000,
+    payloadEstimateMax: 10000,
+    roofIntrusions: [
+      { side: "left", width: 0.100, drop: 0.065, offsetFromWall: 0 },
+      { side: "right", width: 0.100, drop: 0.065, offsetFromWall: 0 }
+    ],
+    notes: "Foreløpig modell basert på leverandørtegning. Payload og detaljer må verifiseres mot fabrikkdata."
+  },
   iso15: {
     label: "15' spesial",
     shortLabel: "15' spesial",
@@ -741,6 +760,7 @@ function App() {
 
 const studyContainerOptions = {
   iso10: containerTypes.iso10,
+  algeco10htbk2: containerTypes.algeco10htbk2,
   iso10hh: containerTypes.iso10hh,
   iso15: containerTypes.iso15,
   iso15hh: containerTypes.iso15hh,
@@ -891,6 +911,7 @@ function ContainerStudy() {
           <label className="study-field study-slider"><span><span>Avstand mellom kolli</span><strong>{studySpacing.toFixed(2)} m</strong></span><input type="range" min="0" max="0.5" step="0.01" value={studySpacing} onChange={(event) => setStudySpacing(Number(event.target.value))} /></label>
           <div className="study-dimensions">
             <span>Innvendig container</span><strong>L {container.usableLength.toFixed(3)} × B {container.usableWidth.toFixed(3)} × H {container.usableHeight.toFixed(3)} m</strong>
+            {container.topOpeningWidth && <><span>Top opening width</span><strong>{container.topOpeningWidth.toFixed(3)} m</strong><span>Merknad</span><strong>Innvendig mål gjelder gulv-/pakkemål. Topprammer i taksone er vist i 3D.</strong></>}
             <span>Lastmål</span><strong>L {load.size.length.toFixed(3)} × B {load.size.width.toFixed(3)} × H {load.size.height.toFixed(3)} m</strong>
           </div>
         </aside>

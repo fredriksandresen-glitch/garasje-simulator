@@ -47,6 +47,21 @@ function ContainerMesh({ container }) {
           <meshStandardMaterial color="#72e6d8" transparent opacity={0.72} metalness={0.45} />
         </mesh>
       ))}
+      {(container.roofIntrusions || []).map((intrusion, index) => {
+        const intrusionWidth = Math.min(intrusion.width, width);
+        const offset = intrusion.offsetFromWall || 0;
+        const sideDirection = intrusion.side === "left" ? -1 : 1;
+        const x = sideDirection * (width / 2 - offset - intrusionWidth / 2);
+        const y = height - intrusion.drop / 2;
+
+        return (
+          <mesh key={`${intrusion.side}-${index}`} position={[x, y, 0]} castShadow>
+            <boxGeometry args={[intrusionWidth, intrusion.drop, length]} />
+            <meshStandardMaterial color="#d79a45" transparent opacity={0.82} metalness={0.58} roughness={0.3} />
+            <Edges scale={1.002} color="#ffd58a" />
+          </mesh>
+        );
+      })}
       <gridHelper args={[Math.max(width, length) * 1.7, 18, "#23474c", "#183239"]} position={[0, -0.045, 0]} />
     </group>
   );
