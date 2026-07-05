@@ -48,18 +48,30 @@ function ContainerMesh({ container }) {
         </mesh>
       ))}
       {(container.roofIntrusions || []).map((intrusion, index) => {
-        const intrusionWidth = Math.min(intrusion.width, width);
+        const intrusionWidth = Math.min(intrusion.inwardDepth ?? intrusion.width, width);
+        const intrusionDrop = intrusion.verticalDrop ?? intrusion.drop;
         const offset = intrusion.offsetFromWall || 0;
         const sideDirection = intrusion.side === "left" ? -1 : 1;
         const x = sideDirection * (width / 2 - offset - intrusionWidth / 2);
-        const y = height - intrusion.drop / 2;
+        const y = height - intrusionDrop / 2;
+        const lipWidth = Math.min(intrusion.lipDetailApprox || 0, intrusionWidth * 0.45);
+        const lipDrop = intrusion.lipDetailApprox ? intrusionDrop * 0.45 : 0;
+        const lipX = sideDirection * (width / 2 - offset - intrusionWidth + lipWidth / 2);
+        const lipY = height - intrusionDrop - lipDrop / 2;
 
         return (
-          <mesh key={`${intrusion.side}-${index}`} position={[x, y, 0]} castShadow>
-            <boxGeometry args={[intrusionWidth, intrusion.drop, length]} />
-            <meshStandardMaterial color="#d79a45" transparent opacity={0.82} metalness={0.58} roughness={0.3} />
-            <Edges scale={1.002} color="#ffd58a" />
-          </mesh>
+          <group key={`${intrusion.side}-${index}`}>
+            <mesh position={[x, y, 0]} castShadow>
+              <boxGeometry args={[intrusionWidth, intrusionDrop, length]} />
+              <meshStandardMaterial color="#d79a45" transparent opacity={0.82} metalness={0.58} roughness={0.3} />
+              <Edges scale={1.002} color="#ffd58a" />
+            </mesh>
+            {lipWidth > 0 && <mesh position={[lipX, lipY, 0]} castShadow>
+              <boxGeometry args={[lipWidth, lipDrop, length]} />
+              <meshStandardMaterial color="#bd7834" transparent opacity={0.88} metalness={0.62} roughness={0.28} />
+              <Edges scale={1.002} color="#ffe0a6" />
+            </mesh>}
+          </group>
         );
       })}
       <gridHelper args={[Math.max(width, length) * 1.7, 18, "#23474c", "#183239"]} position={[0, -0.045, 0]} />
