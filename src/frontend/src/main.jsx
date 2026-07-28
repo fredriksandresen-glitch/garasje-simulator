@@ -123,6 +123,7 @@ const containerTypes = {
     usableWidth: 2.350,
     usableHeight: 2.251,
     tare: 1350,
+    topOpeningLength: 2.713,
     topOpeningWidth: 2.230,
     payloadEstimateMin: 8000,
     payloadEstimateMax: 10000,
@@ -143,7 +144,7 @@ const containerTypes = {
     usableHeight: 1.2225,
     tare: 1350,
     topOpeningWidth: 2.230,
-    topOpeningLength: null,
+    topOpeningLength: 2.713,
     payloadEstimateMin: 8000,
     payloadEstimateMax: 10000,
     hardTop: true,
@@ -1015,14 +1016,14 @@ function Container3DView({ container, load, result, spacing }) {
           <Container3DScene container={container} load={load} result={result} spacing={spacing} />
         </Suspense>
       </ThreeErrorBoundary>
-      {result.compatible && <ClearanceOverlay result={result} />}
+      {result.compatible && <ClearanceOverlay result={result} container={container} />}
       <div className="study-view-hint">Dra for å rotere · rull for å zoome · høyreklikk for å panorere</div>
       {!result.compatible && <div className="study-no-fit"><AlertTriangle size={26} /><strong>Passer ikke</strong><span>{result.reason}</span></div>}
     </div>
   );
 }
 
-function ClearanceOverlay({ result }) {
+function ClearanceOverlay({ result, container }) {
   const top = result.topAccess;
   const front = result.frontAccess;
   return (
@@ -1031,7 +1032,13 @@ function ClearanceOverlay({ result }) {
       <span>Side <b>{formatSceneMillimeters(result.widthClearancePerSide)}</b></span>
       <span>Ende <b>{formatSceneMillimeters(result.lengthClearancePerSide)}</b></span>
       <span>Over <b>{formatSceneMillimeters(result.heightClearanceTop)}</b></span>
-      {top.available && <><strong>Toppåpning</strong>{Number.isFinite(top.lengthClearance) && <span>Lengde <b>{formatSceneMillimeters(top.lengthClearance, true)}</b></span>}{Number.isFinite(top.widthClearance) && <span>Bredde <b>{formatSceneMillimeters(top.widthClearance, true)}</b></span>}</>}
+      {top.available && <>
+        <strong>Toppåpning</strong>
+        {Number.isFinite(container.topOpeningLength) && <span>Åpning L <b>{container.topOpeningLength.toFixed(3)} m</b></span>}
+        {Number.isFinite(container.topOpeningWidth) && <span>Åpning B <b>{container.topOpeningWidth.toFixed(3)} m</b></span>}
+        {Number.isFinite(top.lengthClearance) && <span>Klaring L <b>{formatSceneMillimeters(top.lengthClearance, true)}</b></span>}
+        {Number.isFinite(top.widthClearance) && <span>Klaring B <b>{formatSceneMillimeters(top.widthClearance, true)}</b></span>}
+      </>}
       {front.available && <><strong>Frontdør</strong>{Number.isFinite(front.widthClearance) && <span>Bredde <b>{formatSceneMillimeters(front.widthClearance, true)}</b></span>}{Number.isFinite(front.heightClearance) && <span>Høyde <b>{formatSceneMillimeters(front.heightClearance, true)}</b></span>}</>}
     </div>
   );
