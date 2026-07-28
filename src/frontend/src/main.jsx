@@ -987,6 +987,7 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
         <div className="study-visual-panel">
           <Container3DView container={container} load={load} result={result} spacing={studySpacing} />
           <div className="study-axis"><span>L {container.usableLength.toFixed(3)} m</span><span>B {container.usableWidth.toFixed(3)} m</span><span>H {container.usableHeight.toFixed(3)} m</span></div>
+          <div className="study-load-axis"><strong>{load.label}</strong><span>L {load.size.length.toFixed(3)} × B {load.size.width.toFixed(3)} × H {load.size.height.toFixed(3)} m</span><small>{result.selectedOrientation === "rotated" ? "90° rotert i containeren" : "Standardretning i containeren"}</small></div>
         </div>
       </div>
 
@@ -1014,8 +1015,24 @@ function Container3DView({ container, load, result, spacing }) {
           <Container3DScene container={container} load={load} result={result} spacing={spacing} />
         </Suspense>
       </ThreeErrorBoundary>
+      {result.compatible && <ClearanceOverlay result={result} />}
       <div className="study-view-hint">Dra for å rotere · rull for å zoome · høyreklikk for å panorere</div>
       {!result.compatible && <div className="study-no-fit"><AlertTriangle size={26} /><strong>Passer ikke</strong><span>{result.reason}</span></div>}
+    </div>
+  );
+}
+
+function ClearanceOverlay({ result }) {
+  const top = result.topAccess;
+  const front = result.frontAccess;
+  return (
+    <div className="study-clearance-overlay" aria-label="Klaringer i 3D-visningen">
+      <strong>Innvendig klaring</strong>
+      <span>Side <b>{formatSceneMillimeters(result.widthClearancePerSide)}</b></span>
+      <span>Ende <b>{formatSceneMillimeters(result.lengthClearancePerSide)}</b></span>
+      <span>Over <b>{formatSceneMillimeters(result.heightClearanceTop)}</b></span>
+      {top.available && <><strong>Toppåpning</strong>{Number.isFinite(top.lengthClearance) && <span>Lengde <b>{formatSceneMillimeters(top.lengthClearance, true)}</b></span>}{Number.isFinite(top.widthClearance) && <span>Bredde <b>{formatSceneMillimeters(top.widthClearance, true)}</b></span>}</>}
+      {front.available && <><strong>Frontdør</strong>{Number.isFinite(front.widthClearance) && <span>Bredde <b>{formatSceneMillimeters(front.widthClearance, true)}</b></span>}{Number.isFinite(front.heightClearance) && <span>Høyde <b>{formatSceneMillimeters(front.heightClearance, true)}</b></span>}</>}
     </div>
   );
 }
@@ -1060,6 +1077,7 @@ function ClearancePanel({ result, isTight }) {
 function ClearanceValue({ label, value }) { return <div className={value < 0.05 ? "tight" : ""}><span>{label}</span><strong>{formatStudyMeasure(value)}</strong></div>; }
 function formatStudyMeasure(value) { return `${value.toFixed(3)} m / ${Math.round(value * 1000)} mm`; }
 function formatOptionalStudyMeasure(value) { return Number.isFinite(value) ? formatStudyMeasure(value) : "Ikke oppgitt"; }
+function formatSceneMillimeters(value, signed = false) { const millimeters = Math.round(value * 1000); return `${signed && millimeters >= 0 ? "+" : ""}${millimeters} mm`; }
 
 function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
   return (
