@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertTriangle,
@@ -10,6 +10,7 @@ import {
   Package,
   Plus,
   Ruler,
+  RotateCw,
   Scale,
   Settings2,
   Shield,
@@ -17,6 +18,8 @@ import {
   X
 } from "lucide-react";
 import "./styles.css";
+
+const Container3DScene = lazy(() => import("./Container3DView.jsx"));
 
 const loadTypes = {
   drum210: {
@@ -97,56 +100,123 @@ const containerTypes = {
   iso20: {
     label: "20' ISO",
     shortLabel: "20' ISO",
-    length: 6.06,
-    width: 2.44,
-    height: 2.4,
-    usableLength: 5.9,
-    usableWidth: 2.35,
-    usableHeight: 2.18,
+    length: 6.058,
+    width: 2.438,
+    height: 2.591,
+    usableLength: 5.867,
+    usableWidth: 2.350,
+    usableHeight: 2.390,
     tare: 2200
   },
   iso10: {
     label: "10' ISO",
     shortLabel: "10' ISO",
-    length: 2.99,
-    width: 2.44,
-    height: 2.4,
-    usableLength: 2.78,
-    usableWidth: 2.35,
-    usableHeight: 2.18,
+    length: 2.991,
+    width: 2.438,
+    height: 2.591,
+    usableLength: 2.831,
+    usableWidth: 2.350,
+    usableHeight: 2.390,
     tare: 1300
   },
+  algeco10htbk2: {
+    label: "10' Hard Top BK2",
+    shortLabel: "10' HT BK2",
+    length: 3.029,
+    width: 2.438,
+    height: 2.591,
+    usableLength: 2.900,
+    usableWidth: 2.350,
+    usableHeight: 2.251,
+    tare: 1350,
+    topOpeningWidth: 2.230,
+    payloadEstimateMin: 8000,
+    payloadEstimateMax: 10000,
+    roofIntrusions: [
+      { side: "left", width: 0.100, drop: 0.065, offsetFromWall: 0 },
+      { side: "right", width: 0.100, drop: 0.065, offsetFromWall: 0 }
+    ],
+    notes: "Foreløpig modell basert på leverandørtegning. Payload og detaljer må verifiseres mot fabrikkdata."
+  },
+  hardtop10hhbk2: {
+    label: "10' HH Hard Top BK2",
+    shortLabel: "10' HH BK2",
+    length: 3.029,
+    width: 2.438,
+    height: 1.450,
+    usableLength: 2.900,
+    usableWidth: 2.350,
+    usableHeight: 1.2225,
+    tare: 1350,
+    topOpeningWidth: 2.230,
+    topOpeningLength: null,
+    payloadEstimateMin: 8000,
+    payloadEstimateMax: 10000,
+    hardTop: true,
+    bk2: true,
+    roofIntrusions: [
+      { side: "left", inwardDepth: 0.100, verticalDrop: 0.065, openingInsetApprox: 0.060, lipDetailApprox: 0.086 },
+      { side: "right", inwardDepth: 0.100, verticalDrop: 0.065, openingInsetApprox: 0.060, lipDetailApprox: 0.086 }
+    ],
+    notes: "Foreløpig modell basert på leverandørtegning. Toppåpningslengde, payload og detaljer må verifiseres mot fabrikkdata."
+  },
+  hardtop10hh: {
+    label: "10' HH Hard Top",
+    shortLabel: "10' HH HT",
+    length: 2.991,
+    width: 2.438,
+    height: 1.450,
+    usableLength: 2.831,
+    usableWidth: 2.350,
+    usableHeight: 1.223,
+    tare: 1300,
+    maxGross: 10000,
+    payload: 8700,
+    topOpeningLength: 2.713,
+    topOpeningWidth: 2.230,
+    doorOpeningWidth: 2.340,
+    doorOpeningHeight: 0.850,
+    hardTop: true,
+    halfHeight: true,
+    drawingBased: true,
+    roofProfile: "hardtop10hh",
+    roofIntrusions: [
+      { side: "left", inwardDepth: 0.100, verticalDrop: 0.065, openingInsetApprox: 0.060, lipDetailApprox: 0.086, lowerBoxDepth: 0.065 },
+      { side: "right", inwardDepth: 0.100, verticalDrop: 0.065, openingInsetApprox: 0.060, lipDetailApprox: 0.086, lowerBoxDepth: 0.065 }
+    ],
+    notes: "Basert på leverandørens 10ft Half Height Container with hard top GA drawing. Endelige data må verifiseres mot leverandør."
+  },
   iso15: {
-    label: "15' ISO",
-    shortLabel: "15' ISO",
-    length: 4.55,
-    width: 2.33,
-    height: 2.4,
-    usableLength: 4.35,
-    usableWidth: 2.24,
-    usableHeight: 2.18,
+    label: "15' spesial",
+    shortLabel: "15' spesial",
+    length: 4.572,
+    width: 2.438,
+    height: 2.591,
+    usableLength: 4.380,
+    usableWidth: 2.350,
+    usableHeight: 2.390,
     tare: 1700
   },
   iso15hh: {
-    label: "15' half-height",
+    label: "15' half-height spesial",
     shortLabel: "15' HH",
-    length: 4.55,
-    width: 2.33,
-    height: 0.99,
-    usableLength: 4.35,
-    usableWidth: 2.24,
-    usableHeight: 0.88,
+    length: 4.572,
+    width: 2.438,
+    height: 0.990,
+    usableLength: 4.380,
+    usableWidth: 2.350,
+    usableHeight: 0.880,
     tare: 1400
   },
   iso10hh: {
     label: "10' half-height",
     shortLabel: "10' HH",
-    length: 2.99,
-    width: 2.44,
-    height: 0.99,
-    usableLength: 2.78,
-    usableWidth: 2.35,
-    usableHeight: 0.88,
+    length: 2.991,
+    width: 2.438,
+    height: 0.990,
+    usableLength: 2.831,
+    usableWidth: 2.350,
+    usableHeight: 0.880,
     tare: 1150
   }
 };
@@ -167,45 +237,140 @@ const optionalConstraints = {
 };
 
 const separatorWidth = 0.5;
+const settingsStoragePrefix = "lagerbygg-iii:v1:";
+
+function usePersistentState(key, initialValue) {
+  const [value, setValue] = useState(() => {
+    if (typeof window === "undefined") return initialValue;
+    try {
+      const savedValue = window.localStorage.getItem(`${settingsStoragePrefix}${key}`);
+      return savedValue === null ? initialValue : JSON.parse(savedValue);
+    } catch {
+      return initialValue;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(`${settingsStoragePrefix}${key}`, JSON.stringify(value));
+    } catch {
+      // Simulatoren skal fortsatt fungere dersom nettleseren blokkerer lokal lagring.
+    }
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
 const rooms = [
-  { key: "lager1", label: "Lager 1", x: 0, width: 16.85, baseLength: 24.115, usableLength: 22.015, obstructionArea: 4.85 * 1.8 },
-  { key: "lager2", label: "Lager 2", x: 16.85 + separatorWidth, width: 16.85, usableLength: 29, extendedLength: 34, obstructionArea: 5.15 * 11.985 }
+  {
+    key: "lager1",
+    label: "Lager 1",
+    x: 0,
+    width: 16.85,
+    baseLength: 24.115,
+    usableLength: 22.015,
+    obstructions: [
+      { key: "personsluse1", label: "Personsluse 1", x: 16.85 - 4.85, y: 24.115 - 1.8, width: 4.85, length: 1.8, type: "yellow" }
+    ]
+  },
+  {
+    key: "lager2",
+    label: "Lager 2",
+    x: 16.85 + separatorWidth,
+    width: 16.85,
+    usableLength: 29,
+    extendedLength: 34,
+    obstructions: [
+      { key: "forrom-sluse", label: "Forrom / sluse", x: 0, y: 34 - 11.985, width: 5.15, length: 11.985, type: "yellow" }
+    ],
+    extension: { key: "rosa-felt", label: "Rosa felt", x: 0, y: 29, width: 16.85, length: 5, type: "pink" }
+  }
 ];
 
+function rectanglesOverlap(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.length &&
+    a.y + a.length > b.y
+  );
+}
+
+function rectangleIntersectionArea(a, b) {
+  const overlapWidth = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const overlapLength = Math.max(0, Math.min(a.y + a.length, b.y + b.length) - Math.max(a.y, b.y));
+  return overlapWidth * overlapLength;
+}
+
+function buildRoomSlotGrid({ room, storageLength, containerPlacement, wallClearance, doorClearance, aisleGap, includeMarkedAreas }) {
+  const footprint = { length: containerPlacement.length + aisleGap, width: containerPlacement.width + aisleGap };
+  const clearWidth = Math.max(0, room.width - wallClearance * 2);
+  const clearLength = Math.max(0, storageLength - doorClearance);
+  const cols = Math.max(0, Math.floor(clearLength / footprint.length));
+  const rows = Math.max(0, Math.floor(clearWidth / footprint.width));
+  const slots = [];
+
+  for (let col = 0; col < cols; col += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      const rectangle = {
+        x: wallClearance + row * footprint.width,
+        y: wallClearance + col * footprint.length,
+        width: containerPlacement.width,
+        length: containerPlacement.length
+      };
+      const blockedBy = (room.obstructions || []).find((obstruction) => rectanglesOverlap(rectangle, obstruction)) || null;
+      slots.push({
+        key: `${room.key}-${col}-${row}`,
+        ...rectangle,
+        blockedBy,
+        blocked: !includeMarkedAreas && Boolean(blockedBy)
+      });
+    }
+  }
+
+  const clearArea = { x: wallClearance, y: wallClearance, width: clearWidth, length: clearLength };
+  const obstructedArea = includeMarkedAreas
+    ? 0
+    : (room.obstructions || []).reduce((sum, obstruction) => sum + rectangleIntersectionArea(clearArea, obstruction), 0);
+
+  return { slots, cols, rows, clearWidth, clearLength, effectiveArea: Math.max(0, clearWidth * clearLength - obstructedArea) };
+}
+
 function App() {
-  const [planningMode, setPlanningMode] = useState("scenario");
-  const [heightLimit, setHeightLimit] = useState(6.3);
-  const [stackLimit, setStackLimit] = useState(4);
-  const [halfHeightStackLimit, setHalfHeightStackLimit] = useState(6);
-  const [wallClearance, setWallClearance] = useState(0.5);
-  const [doorClearance, setDoorClearance] = useState(0.9);
-  const [aisleGap, setAisleGap] = useState(0.8);
-  const [useLager2Extension, setUseLager2Extension] = useState(true);
-  const [includeMarkedAreas, setIncludeMarkedAreas] = useState(false);
-  const [containerType, setContainerType] = useState("iso15");
-  const [rotateContainers, setRotateContainers] = useState(false);
-  const [containerGrossLimit, setContainerGrossLimit] = useState(24000);
-  const [containerDoseLimit, setContainerDoseLimit] = useState(2);
-  const [trailerLimit, setTrailerLimit] = useState(30000);
-  const [selectedSteelVariant, setSelectedSteelVariant] = useState("steel1");
-  const [rotateSteelBoxes, setRotateSteelBoxes] = useState(false);
-  const [drumPackLimit, setDrumPackLimit] = useState(12);
-  const [steelPackLimit, setSteelPackLimit] = useState(1);
-  const [kokillePackLimit, setKokillePackLimit] = useState(4);
-  const [existingDrumEq, setExistingDrumEq] = useState(582);
-  const [annualDrumEq, setAnnualDrumEq] = useState(200);
-  const [years, setYears] = useState(19);
-  const [drumShare, setDrumShare] = useState(68);
-  const [steelShare, setSteelShare] = useState(31);
-  const [kokilleSharePct, setKokilleSharePct] = useState(1);
-  const [drumWeight, setDrumWeight] = useState(330);
-  const [steelWeight, setSteelWeight] = useState(3000);
-  const [kokilleWeight, setKokilleWeight] = useState(1800);
-  const [drumDose, setDrumDose] = useState(0.12);
-  const [steelDose, setSteelDose] = useState(0.35);
-  const [kokilleDose, setKokilleDose] = useState(0.8);
-  const [customLoads, setCustomLoads] = useState({ drum210: 0, steel1: 100, steel2: 20, steel3: 0, steel4: 0, kokille: 0 });
-  const [activeConstraints, setActiveConstraints] = useState([]);
+  const [planningMode, setPlanningMode] = usePersistentState("planningMode", "scenario");
+  const [heightLimit, setHeightLimit] = usePersistentState("heightLimit", 6.3);
+  const [stackLimit, setStackLimit] = usePersistentState("stackLimit", 4);
+  const [halfHeightStackLimit, setHalfHeightStackLimit] = usePersistentState("halfHeightStackLimit", 6);
+  const [wallClearance, setWallClearance] = usePersistentState("wallClearance", 0.5);
+  const [doorClearance, setDoorClearance] = usePersistentState("doorClearance", 0.9);
+  const [aisleGap, setAisleGap] = usePersistentState("aisleGap", 0.8);
+  const [useLager2Extension, setUseLager2Extension] = usePersistentState("useLager2Extension", true);
+  const [includeMarkedAreas, setIncludeMarkedAreas] = usePersistentState("includeMarkedAreas", false);
+  const [containerType, setContainerType] = usePersistentState("containerType", "iso15");
+  const [rotateContainers, setRotateContainers] = usePersistentState("rotateContainers", false);
+  const [containerGrossLimit, setContainerGrossLimit] = usePersistentState("containerGrossLimit", 24000);
+  const [containerDoseLimit, setContainerDoseLimit] = usePersistentState("containerDoseLimit", 2);
+  const [trailerLimit, setTrailerLimit] = usePersistentState("trailerLimit", 30000);
+  const [selectedSteelVariant, setSelectedSteelVariant] = usePersistentState("selectedSteelVariant", "steel1");
+  const [rotateSteelBoxes, setRotateSteelBoxes] = usePersistentState("rotateSteelBoxes", false);
+  const [optimizeSteelOrientation, setOptimizeSteelOrientation] = usePersistentState("optimizeSteelOrientation", true);
+  const [drumPackLimit, setDrumPackLimit] = usePersistentState("drumPackLimit", 12);
+  const [steelPackLimit, setSteelPackLimit] = usePersistentState("steelPackLimit", 1);
+  const [kokillePackLimit, setKokillePackLimit] = usePersistentState("kokillePackLimit", 4);
+  const [existingDrumEq, setExistingDrumEq] = usePersistentState("existingDrumEq", 582);
+  const [annualDrumEq, setAnnualDrumEq] = usePersistentState("annualDrumEq", 200);
+  const [years, setYears] = usePersistentState("years", 19);
+  const [drumShare, setDrumShare] = usePersistentState("drumShare", 68);
+  const [steelShare, setSteelShare] = usePersistentState("steelShare", 31);
+  const [kokilleSharePct, setKokilleSharePct] = usePersistentState("kokilleSharePct", 1);
+  const [drumWeight, setDrumWeight] = usePersistentState("drumWeight", 330);
+  const [steelWeight, setSteelWeight] = usePersistentState("steelWeight", 3000);
+  const [kokilleWeight, setKokilleWeight] = usePersistentState("kokilleWeight", 1800);
+  const [drumDose, setDrumDose] = usePersistentState("drumDose", 0.12);
+  const [steelDose, setSteelDose] = usePersistentState("steelDose", 0.35);
+  const [kokilleDose, setKokilleDose] = usePersistentState("kokilleDose", 0.8);
+  const [customLoads, setCustomLoads] = usePersistentState("customLoads", { drum210: 0, steel1: 100, steel2: 20, steel3: 0, steel4: 0, kokille: 0 });
+  const [activeConstraints, setActiveConstraints] = usePersistentState("activeConstraints", []);
   const [showConstraintMenu, setShowConstraintMenu] = useState(false);
 
   const model = useMemo(() => {
@@ -215,7 +380,6 @@ function App() {
     const containerPlacement = rotateContainers
       ? { length: container.width, width: container.length }
       : { length: container.length, width: container.width };
-    const footprint = { length: containerPlacement.length + aisleGap, width: containerPlacement.width + aisleGap };
     const maxLevelsForHeight = Math.max(1, Math.floor(heightLimit / container.height));
     const levels = Math.max(1, Math.min(stackLimit, maxLevelsForHeight));
     const maxHalfLevelsForHeight = halfContainer ? Math.max(1, Math.floor(heightLimit / halfContainer.height)) : 0;
@@ -226,23 +390,27 @@ function App() {
     const roomModels = rooms.map((room) => {
       const storageLength = room.key === "lager2" && useLager2Extension ? room.extendedLength : room.usableLength;
       const displayLength = room.key === "lager1" ? room.baseLength : room.extendedLength;
-      const clearWidth = Math.max(0, room.width - wallClearance * 2);
-      const clearLength = Math.max(0, storageLength - doorClearance);
-      const cols = Math.max(0, Math.floor(clearLength / footprint.length));
-      const rows = Math.max(0, Math.floor(clearWidth / footprint.width));
-      const obstructionSlots = includeMarkedAreas ? 0 : Math.ceil(room.obstructionArea / (footprint.length * footprint.width));
-      const floorSlots = Math.max(0, cols * rows - obstructionSlots);
+      const grid = buildRoomSlotGrid({ room, storageLength, containerPlacement, wallClearance, doorClearance, aisleGap, includeMarkedAreas });
+      const blockedSlots = grid.slots.filter((slot) => slot.blocked);
+      const availableSlots = grid.slots.filter((slot) => !slot.blocked);
+      const floorSlots = availableSlots.length;
       return {
         ...room,
         storageLength,
         displayLength,
-        cols,
-        rows,
+        cols: grid.cols,
+        rows: grid.rows,
+        geometricSlots: grid.slots,
+        grossSlots: grid.slots.length,
+        blockedSlots,
+        availableSlots,
         floorSlots,
         totalSlots: floorSlots,
         wallClearance,
         doorClearance,
-        effectiveArea: clearWidth * clearLength - (includeMarkedAreas ? 0 : room.obstructionArea),
+        includeMarkedAreas,
+        useLager2Extension,
+        effectiveArea: grid.effectiveArea,
         leftPct: (room.x / planWidth) * 100,
         topPct: ((planLength - displayLength) / planLength) * 100,
         widthPct: (room.width / planWidth) * 100,
@@ -263,7 +431,9 @@ function App() {
     const loadRows = Object.entries(loadTypes).map(([key, load]) => {
       const packageWeight = weights[key];
       const packageDose = doses[key];
-      const orientationMode = load.shareKey === "steel" ? (rotateSteelBoxes ? "rotated" : "straight") : "auto";
+      const orientationMode = load.shareKey === "steel"
+        ? optimizeSteelOrientation ? "auto" : rotateSteelBoxes ? "rotated" : "straight"
+        : "auto";
       const evaluateOption = (candidate, heightKind, stackLevels) => {
         const fit = getFit(candidate, load.size, orientationMode);
         const physicalPackLimit = Number.isFinite(fit.physicalCount) ? fit.physicalCount : packLimits[load.packKey];
@@ -354,10 +524,7 @@ function App() {
       const { slots, nextOffset } = buildRoomVisualSlots({
         room,
         container,
-        containerPlacement,
         containerRotated: rotateContainers,
-        wallClearance,
-        aisleGap,
         visualQueue,
         offset: visualOffset
       });
@@ -414,6 +581,7 @@ function App() {
     trailerLimit,
     selectedSteelVariant,
     rotateSteelBoxes,
+    optimizeSteelOrientation,
     drumPackLimit,
     steelPackLimit,
     kokillePackLimit,
@@ -442,8 +610,13 @@ function App() {
   const clampedStackLimit = Math.min(stackLimit, maxStackLevel);
   const clampedHalfHeightStackLimit = activeHalfContainer ? Math.min(halfHeightStackLimit, maxHalfStackLevel) : 0;
   const selectedSteel = loadTypes[selectedSteelVariant];
-  const standardSteelFit = getFit(activeContainer, selectedSteel.size, "straight");
-  const rotatedSteelFit = getFit(activeContainer, selectedSteel.size, "rotated");
+  const selectedSteelRow = model.loadRows.find((row) => row.key === selectedSteelVariant);
+  const selectedSteelContainer = selectedSteelRow?.containerChoice || activeContainer;
+  const standardSteelFit = getFit(selectedSteelContainer, selectedSteel.size, "straight");
+  const rotatedSteelFit = getFit(selectedSteelContainer, selectedSteel.size, "rotated");
+  const activeSteelRows = model.loadRows.filter((row) =>
+    row.shareKey === "steel" && (planningMode === "scenario" ? row.key === selectedSteelVariant : customLoads[row.key] > 0)
+  );
   const customPackageCount = Object.values(customLoads).reduce((sum, quantity) => sum + quantity, 0);
   const setCustomLoad = (key, value) => setCustomLoads((current) => ({ ...current, [key]: Math.max(0, Math.round(value)) }));
   const addConstraint = (key) => {
@@ -451,6 +624,10 @@ function App() {
     setShowConstraintMenu(false);
   };
   const removeConstraint = (key) => setActiveConstraints((current) => current.filter((item) => item !== key));
+  const setManualSteelRotation = (value) => {
+    setOptimizeSteelOrientation(false);
+    setRotateSteelBoxes(value);
+  };
 
   return (
     <main className="app-shell">
@@ -460,7 +637,7 @@ function App() {
             <p className="eyebrow">Lagerbygg III</p>
             <h1>Radioaktivt avfall: lager- og containersimulator</h1>
           </div>
-          <div className={model.mixedCoverage >= 1 ? "score good" : "score warn"}>
+          {planningMode !== "study" && <div className={model.mixedCoverage >= 1 ? "score good" : "score warn"}>
             <div className="score-label">
               {planningMode === "custom" ? "Lastdekning" : "Scenario dekning"}
               <span className="info-dot" tabIndex="0">
@@ -469,14 +646,16 @@ function App() {
               </span>
             </div>
             <div className="score-value"><Gauge size={20} /><span>{Math.round(model.mixedCoverage * 100)}%</span></div>
-          </div>
+          </div>}
         </header>
 
         <nav className="mode-tabs" aria-label="Planleggingsmodus">
           <button type="button" className={planningMode === "scenario" ? "active" : ""} onClick={() => setPlanningMode("scenario")}>Scenario</button>
           <button type="button" className={planningMode === "custom" ? "active" : ""} onClick={() => setPlanningMode("custom")}>Fri lastkombinasjon</button>
+          <button type="button" className={planningMode === "study" ? "active" : ""} onClick={() => setPlanningMode("study")}>Containerstudie</button>
         </nav>
 
+        {planningMode === "study" ? <ContainerStudy /> : <>
         <section className="summary-grid">
           <SummaryCard icon={<Warehouse />} label="Lagerkapasitet" value={model.totalFloorSlots} unit="gulvplasser" />
           <SummaryCard icon={<Boxes />} label="Blandet behov" value={model.requiredFloorSlots} unit="gulvplasser" />
@@ -544,9 +723,10 @@ function App() {
               <Slider label="Andel 210L" value={drumShare} min={0} max={100} step={1} unit="%" onChange={setDrumShare} />
               <Slider label="Andel stålkasser" value={steelShare} min={0} max={100} step={1} unit="%" onChange={setSteelShare} />
               <Segmented options={steelVariantOptions} value={selectedSteelVariant} onChange={setSelectedSteelVariant} />
-              <Toggle label="Roter stålkasser 90°" checked={rotateSteelBoxes} onChange={setRotateSteelBoxes} />
+              <button className={`optimize-button ${optimizeSteelOrientation ? "active" : ""}`} type="button" onClick={() => setOptimizeSteelOrientation(true)}><RotateCw size={17} />Optimaliser stålkasser i valgt container</button>
+              <Toggle label="Bruk 90° manuelt" checked={!optimizeSteelOrientation && rotateSteelBoxes} onChange={setManualSteelRotation} />
               <div className="container-note">
-                Fysisk kapasitet for {selectedSteel.shortLabel}: standard {standardSteelFit.physicalCount} stk · 90° {rotatedSteelFit.physicalCount} stk. Valgt maksgrense: {steelPackLimit} stk.
+                Fysisk kapasitet for {selectedSteel.shortLabel} i {selectedSteelContainer.shortLabel}: standard {standardSteelFit.physicalCount} stk · 90° {rotatedSteelFit.physicalCount} stk. {optimizeSteelOrientation ? `Valgt automatisk: ${selectedSteelRow?.fit.orientation === "rotated" ? "90°" : "standard"}.` : `Valgt manuelt: ${rotateSteelBoxes ? "90°" : "standard"}.`} Maksgrense: {steelPackLimit} stk.
               </div>
               <Slider label="Andel kokiller" value={kokilleSharePct} min={0} max={100} step={1} unit="%" onChange={setKokilleSharePct} />
               <div className={model.shareTotal === 100 ? "derived" : "derived warning-text"}>Sum andeler: {model.shareTotal.toFixed(0)}%</div>
@@ -557,7 +737,15 @@ function App() {
                   <QuantityControl key={key} label={load.label} detail={load.dimensions} value={customLoads[key]} onChange={(value) => setCustomLoad(key, value)} />
                 ))}
               </div>
-              <Toggle label="Roter stålkasser 90°" checked={rotateSteelBoxes} onChange={setRotateSteelBoxes} />
+              <button className={`optimize-button ${optimizeSteelOrientation ? "active" : ""}`} type="button" onClick={() => setOptimizeSteelOrientation(true)}><RotateCw size={17} />Optimaliser stålkasser i valgt container</button>
+              <Toggle label="Bruk 90° manuelt" checked={!optimizeSteelOrientation && rotateSteelBoxes} onChange={setManualSteelRotation} />
+              <div className="container-note">
+                {optimizeSteelOrientation
+                  ? activeSteelRows.length > 0
+                    ? activeSteelRows.map((row) => `${row.shortLabel} i ${row.containerChoice.shortLabel}: ${row.fit.orientation === "rotated" ? "90°" : "standard"}, ${row.fit.physicalCount} stk`).join(" · ")
+                    : "Legg til en stålkassevariant. Simulatoren tester standard og 90° og velger retningen med flest plasser."
+                  : `Manuell retning brukes for alle stålkasser: ${rotateSteelBoxes ? "90°" : "standard"}.`}
+              </div>
 
               <PanelTitle icon={<Shield />} title="Valgte begrensninger" />
               <div className="constraint-builder">
@@ -612,14 +800,227 @@ function App() {
             <section className="warnings" aria-label="Begrensninger">{warnings.map((warning) => <div className={`warning ${warning.level}`} key={warning.text}><AlertTriangle size={17} /><span>{warning.text}</span></div>)}</section>
           </section>
         </div>
+        </>}
       </section>
     </main>
   );
 }
 
+const studyContainerOptions = {
+  iso10: containerTypes.iso10,
+  algeco10htbk2: containerTypes.algeco10htbk2,
+  iso10hh: containerTypes.iso10hh,
+  hardtop10hh: containerTypes.hardtop10hh,
+  hardtop10hhbk2: containerTypes.hardtop10hhbk2,
+  iso15: containerTypes.iso15,
+  iso15hh: containerTypes.iso15hh,
+  iso20: containerTypes.iso20
+};
+
+const customStudyContainerDefaults = {
+  usableLength: 4.38,
+  usableWidth: 2.35,
+  usableHeight: 2.39
+};
+
+const studyOrientationOptions = {
+  auto: { label: "Auto" },
+  straight: { label: "Standard" },
+  rotated: { label: "90° rotert" }
+};
+
+function normalizeStudyDimension(value, fallback) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : fallback;
+}
+
+function buildCustomStudyContainer(customContainer) {
+  const usableLength = normalizeStudyDimension(customContainer.usableLength, customStudyContainerDefaults.usableLength);
+  const usableWidth = normalizeStudyDimension(customContainer.usableWidth, customStudyContainerDefaults.usableWidth);
+  const usableHeight = normalizeStudyDimension(customContainer.usableHeight, customStudyContainerDefaults.usableHeight);
+
+  return {
+    label: "Egendefinert container",
+    shortLabel: "Custom",
+    length: usableLength,
+    width: usableWidth,
+    height: usableHeight,
+    usableLength,
+    usableWidth,
+    usableHeight,
+    tare: 0
+  };
+}
+
+function evaluatePackingOrientation(container, load, orientation, spacing) {
+  const itemLength = orientation === "rotated" ? load.size.width : load.size.length;
+  const itemWidth = orientation === "rotated" ? load.size.length : load.size.width;
+  const itemHeight = load.size.height;
+  const rows = Math.max(0, Math.floor((container.usableLength + spacing) / (itemLength + spacing)));
+  const cols = Math.max(0, Math.floor((container.usableWidth + spacing) / (itemWidth + spacing)));
+  const heightFits = itemHeight <= container.usableHeight;
+  const count = heightFits ? rows * cols : 0;
+  const usedLength = rows > 0 ? rows * itemLength + Math.max(0, rows - 1) * spacing : itemLength;
+  const usedWidth = cols > 0 ? cols * itemWidth + Math.max(0, cols - 1) * spacing : itemWidth;
+  const clearanceLength = container.usableLength - usedLength;
+  const clearanceWidth = container.usableWidth - usedWidth;
+  const clearanceHeight = container.usableHeight - itemHeight;
+
+  return {
+    orientation,
+    itemLength,
+    itemWidth,
+    itemHeight,
+    rows,
+    cols,
+    count,
+    usedLength,
+    usedWidth,
+    usedHeight: itemHeight,
+    clearanceLength,
+    clearanceWidth,
+    clearanceHeight,
+    practicalMargin: Math.min(clearanceLength, clearanceWidth)
+  };
+}
+
+function getPackingStudy(container, load, orientationMode = "auto", spacing = 0.05) {
+  const candidates = (orientationMode === "auto" ? ["straight", "rotated"] : [orientationMode])
+    .map((orientation) => evaluatePackingOrientation(container, load, orientation, spacing));
+  const selected = candidates.reduce((best, candidate) => {
+    if (!best || candidate.count > best.count) return candidate;
+    if (candidate.count < best.count) return best;
+    if (candidate.practicalMargin > best.practicalMargin) return candidate;
+    return best;
+  }, null);
+  const heightFails = selected.itemHeight > container.usableHeight;
+  const lengthFails = selected.itemLength > container.usableLength;
+  const widthFails = selected.itemWidth > container.usableWidth;
+  const failures = [heightFails && "høyde", lengthFails && "lengde", widthFails && "bredde"].filter(Boolean);
+  const compatible = selected.count > 0;
+  const floorArea = container.usableLength * container.usableWidth;
+  const volume = floorArea * container.usableHeight;
+  const loadFloorArea = selected.count * selected.itemLength * selected.itemWidth;
+  const loadVolume = loadFloorArea * selected.itemHeight;
+
+  return {
+    compatible,
+    selectedOrientation: selected.orientation,
+    cols: selected.cols,
+    rows: selected.rows,
+    count: selected.count,
+    usedLength: selected.usedLength,
+    usedWidth: selected.usedWidth,
+    usedHeight: selected.usedHeight,
+    clearanceLength: selected.clearanceLength,
+    clearanceWidth: selected.clearanceWidth,
+    clearanceHeight: selected.clearanceHeight,
+    lengthClearancePerSide: selected.clearanceLength / 2,
+    widthClearancePerSide: selected.clearanceWidth / 2,
+    heightClearanceTop: selected.clearanceHeight,
+    itemLength: selected.itemLength,
+    itemWidth: selected.itemWidth,
+    floorAreaUtilization: compatible ? (loadFloorArea / floorArea) * 100 : 0,
+    volumeUtilization: compatible ? (loadVolume / volume) * 100 : 0,
+    criticalClearance: compatible ? Math.min(selected.clearanceLength, selected.clearanceWidth, selected.clearanceHeight) : Math.min(selected.clearanceLength, selected.clearanceWidth, selected.clearanceHeight),
+    reason: compatible ? "Lasten passer innenfor containerens innvendige mål." : `Passer ikke på grunn av ${failures.length ? failures.join(" og ") : "tilgjengelig pakkeflate"}.`
+  };
+}
+
+function ContainerStudy() {
+  const [studyContainerKey, setStudyContainerKey] = usePersistentState("studyContainer", "iso10");
+  const [customStudyContainer, setCustomStudyContainer] = usePersistentState("customStudyContainer", customStudyContainerDefaults);
+  const [studyLoadKey, setStudyLoadKey] = usePersistentState("studyLoad", "steel1");
+  const [studyOrientation, setStudyOrientation] = usePersistentState("studyOrientation", "auto");
+  const [studySpacing, setStudySpacing] = usePersistentState("studySpacing", 0.05);
+  const customContainer = useMemo(() => buildCustomStudyContainer(customStudyContainer), [customStudyContainer]);
+  const container = studyContainerKey === "custom" ? customContainer : studyContainerOptions[studyContainerKey] || containerTypes.iso10;
+  const load = loadTypes[studyLoadKey] || loadTypes.steel1;
+  const result = useMemo(() => getPackingStudy(container, load, studyOrientation, studySpacing), [container, load, studyOrientation, studySpacing]);
+  const isTight = result.compatible && result.criticalClearance < 0.05;
+  const updateCustomDimension = (field, value) => setCustomStudyContainer((current) => ({ ...current, [field]: value }));
+
+  return (
+    <section className="container-study dark-study">
+      <div className="study-heading">
+        <div><p className="eyebrow">Ren pakkestudie</p><h2>Last i container</h2><p>Innvendige containermål, kollimål og praktiske klaringer – helt uavhengig av lagerbygget.</p></div>
+        <div className={`study-status ${result.compatible ? "fits" : "fails"}`}>{result.compatible ? "Passer" : "Passer ikke"}</div>
+      </div>
+
+      <div className="study-layout">
+        <aside className="study-controls">
+          <label className="study-field"><span>Container</span><select value={studyContainerKey} onChange={(event) => setStudyContainerKey(event.target.value)}><option value="custom">Egendefinert container</option>{Object.entries(studyContainerOptions).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+          {studyContainerKey === "custom" && <div className="study-custom-container" aria-label="Egendefinerte innvendige containermål">
+            <span>Innvendige mål</span>
+            <label><small>Lengde (m)</small><input type="number" min="0.1" step="0.001" value={customStudyContainer.usableLength} onChange={(event) => updateCustomDimension("usableLength", event.target.value)} /></label>
+            <label><small>Bredde (m)</small><input type="number" min="0.1" step="0.001" value={customStudyContainer.usableWidth} onChange={(event) => updateCustomDimension("usableWidth", event.target.value)} /></label>
+            <label><small>Høyde (m)</small><input type="number" min="0.1" step="0.001" value={customStudyContainer.usableHeight} onChange={(event) => updateCustomDimension("usableHeight", event.target.value)} /></label>
+          </div>}
+          <label className="study-field"><span>Lasttype</span><select value={studyLoadKey} onChange={(event) => setStudyLoadKey(event.target.value)}>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+          <div className="study-field"><span>Orientering</span><div className="study-segments">{Object.entries(studyOrientationOptions).map(([key, item]) => <button type="button" key={key} className={studyOrientation === key ? "active" : ""} onClick={() => setStudyOrientation(key)}>{item.label}</button>)}</div></div>
+          <label className="study-field study-slider"><span><span>Avstand mellom kolli</span><strong>{studySpacing.toFixed(2)} m</strong></span><input type="range" min="0" max="0.5" step="0.01" value={studySpacing} onChange={(event) => setStudySpacing(Number(event.target.value))} /></label>
+          <div className="study-dimensions">
+            <span>Utvendig container</span><strong>L {container.length.toFixed(3)} × B {container.width.toFixed(3)} × H {container.height.toFixed(3)} m</strong>
+            <span>Innvendig container</span><strong>L {container.usableLength.toFixed(3)} × B {container.usableWidth.toFixed(3)} × H {container.usableHeight.toFixed(3)} m</strong>
+            {(container.topOpeningLength || container.topOpeningWidth) && <><span>Top opening</span><strong>{container.topOpeningLength ? `L ${container.topOpeningLength.toFixed(3)} × ` : ""}B {container.topOpeningWidth.toFixed(3)} m</strong></>}
+            {(container.doorOpeningWidth || container.doorOpeningHeight) && <><span>Døråpning</span><strong>B {container.doorOpeningWidth.toFixed(3)} × H {container.doorOpeningHeight.toFixed(3)} m</strong></>}
+            {(container.tare || container.payload || container.maxGross) && <><span>Vektdata</span><strong>{container.tare ? `Tare ca. ${formatNumber(container.tare)} kg` : ""}{container.payload ? ` · Payload ca. ${formatNumber(container.payload)} kg` : ""}{container.maxGross ? ` · Max gross ca. ${formatNumber(container.maxGross)} kg` : ""}</strong></>}
+            {container.topOpeningWidth && <><span>Hard-top geometri</span><strong>{container.hardTop ? "Toppinnbygginger er vist i 3D med toppramme, lip, nedheng og skrå støtte." : "Innvendig mål gjelder gulv-/pakkemål. Topprammer i taksone er vist i 3D."}</strong></>}
+            {container.notes && <><span>Merknad</span><strong>{container.notes}</strong></>}
+            <span>Lastmål</span><strong>L {load.size.length.toFixed(3)} × B {load.size.width.toFixed(3)} × H {load.size.height.toFixed(3)} m</strong>
+          </div>
+        </aside>
+
+        <div className="study-visual-panel">
+          <Container3DView container={container} load={load} result={result} spacing={studySpacing} />
+          <div className="study-axis"><span>L {container.usableLength.toFixed(3)} m</span><span>B {container.usableWidth.toFixed(3)} m</span><span>H {container.usableHeight.toFixed(3)} m</span></div>
+        </div>
+      </div>
+
+      <div className="study-results">
+        <article><span>Antall</span><strong>{result.count} stk</strong><small>{result.rows} rader × {result.cols} kolonner</small></article>
+        <article><span>Valgt orientering</span><strong>{result.selectedOrientation === "rotated" ? "90° rotert" : "Standard"}</strong><small>{studyOrientation === "auto" ? "valgt automatisk" : "valgt manuelt"}</small></article>
+        <article><span>Gulvareal</span><strong>{(result.count * result.itemLength * result.itemWidth).toFixed(2)} m²</strong><small>{result.floorAreaUtilization.toFixed(1)} % utnyttelse</small></article>
+        <article><span>Volumutnyttelse</span><strong>{result.volumeUtilization.toFixed(1)} %</strong><small>av innvendig volum</small></article>
+        <article className={isTight ? "tight" : ""}><span>Kritisk minste klaring</span><strong>{formatStudyMeasure(result.criticalClearance)}</strong><small>{result.compatible ? "total restklaring" : "negativ verdi betyr konflikt"}</small></article>
+      </div>
+
+      <ClearancePanel result={result} isTight={isTight} />
+    </section>
+  );
+}
+
+function Container3DView({ container, load, result, spacing }) {
+  const resetKey = `${container.usableLength}-${container.usableHeight}-${load.packKey}-${result.selectedOrientation}`;
+
+  return (
+    <div className={`study-webgl ${result.compatible ? "" : "incompatible"}`}>
+      <ThreeErrorBoundary resetKey={resetKey}>
+        <Suspense fallback={<div className="study-webgl-fallback">Laster 3D-visning …</div>}>
+          <Container3DScene container={container} load={load} result={result} spacing={spacing} />
+        </Suspense>
+      </ThreeErrorBoundary>
+      <div className="study-view-hint">Dra for å rotere · rull for å zoome · høyreklikk for å panorere</div>
+      {!result.compatible && <div className="study-no-fit"><AlertTriangle size={26} /><strong>Passer ikke</strong><span>{result.reason}</span></div>}
+    </div>
+  );
+}
+
+class ThreeErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidUpdate(previousProps) { if (this.state.failed && previousProps.resetKey !== this.props.resetKey) this.setState({ failed: false }); }
+  render() { return this.state.failed ? <div className="study-webgl-fallback">3D-visning kunne ikke lastes. Klaringsdataene under er fortsatt gyldige.</div> : this.props.children; }
+}
+
+function ClearancePanel({ result, isTight }) {
+  return <section className={`clearance-panel ${!result.compatible ? "incompatible" : ""}`}><div><h3>Klaringer</h3><p>{result.reason}</p></div>{result.compatible && <div className="clearance-grid"><ClearanceValue label="Lengde total" value={result.clearanceLength} /><ClearanceValue label="Lengde per ende" value={result.lengthClearancePerSide} /><ClearanceValue label="Bredde total" value={result.clearanceWidth} /><ClearanceValue label="Bredde per side" value={result.widthClearancePerSide} /><ClearanceValue label="Høyde over last" value={result.heightClearanceTop} /></div>}{isTight && <div className="tight-warning"><AlertTriangle size={18} />Trang klaring – må verifiseres mot faktisk container og innlastingsmetode.</div>}</section>;
+}
+
+function ClearanceValue({ label, value }) { return <div className={value < 0.05 ? "tight" : ""}><span>{label}</span><strong>{formatStudyMeasure(value)}</strong></div>; }
+function formatStudyMeasure(value) { return `${value.toFixed(3)} m / ${Math.round(value * 1000)} mm`; }
+
 function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
-  const markedClass = includeMarkedAreas ? "blocked included" : "blocked excluded";
-  const markedStatus = includeMarkedAreas ? "inkludert" : "fratrukket";
   return (
     <div className="plan-shell">
       <div className="plan-canvas" style={{ aspectRatio: `${model.planWidth} / ${model.planLength}` }}>
@@ -627,11 +1028,6 @@ function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
         <div className="dimension dimension-height">Lager 2: {model.planLength.toFixed(0)} m</div>
         {model.roomModels.map((room) => <PlanRoom key={room.key} room={room} model={model} />)}
         <div className="separator" style={{ left: `${(16.85 / model.planWidth) * 100}%`, width: `${(separatorWidth / model.planWidth) * 100}%` }} />
-        <div className={`${markedClass} blocked-l1`}>Personsluse 1<br />4.85 x 1.8 m<br />{markedStatus}</div>
-        <div className={`${markedClass} blocked-l2`}>Forrom / sluse<br />5.15 x 11.99 m<br />{markedStatus}</div>
-        <div className={useLager2Extension ? "extension-label included" : "extension-label excluded"}>
-          Rosa felt<br />17.15 x 5.00 m<br />{useLager2Extension ? "inkludert" : "fratrukket"}
-        </div>
       </div>
       <div className="plan-legend">
         <span><i className="legend-storage" />Lagerareal</span>
@@ -659,10 +1055,37 @@ function PlanRoom({ room, model }) {
           bottom: `${(room.wallClearance / room.displayLength) * 100}%`
         }}
       />
+      {(room.obstructions || []).map((obstruction) => (
+        <div
+          className={`room-obstruction ${room.includeMarkedAreas ? "included" : "excluded"}`}
+          key={obstruction.key}
+          style={{
+            left: `${(obstruction.x / room.width) * 100}%`,
+            top: `${((room.displayLength - obstruction.y - obstruction.length) / room.displayLength) * 100}%`,
+            width: `${(obstruction.width / room.width) * 100}%`,
+            height: `${(obstruction.length / room.displayLength) * 100}%`
+          }}
+        >
+          {obstruction.label}<br />{obstruction.width.toFixed(2)} x {obstruction.length.toFixed(2)} m<br />{room.includeMarkedAreas ? "inkludert" : "fratrukket"}
+        </div>
+      ))}
+      {room.extension && (
+        <div
+          className={`room-extension ${room.useLager2Extension ? "included" : "excluded"}`}
+          style={{
+            left: `${(room.extension.x / room.width) * 100}%`,
+            top: `${((room.displayLength - room.extension.y - room.extension.length) / room.displayLength) * 100}%`,
+            width: `${(room.extension.width / room.width) * 100}%`,
+            height: `${(room.extension.length / room.displayLength) * 100}%`
+          }}
+        >
+          {room.extension.label}<br />{room.useLager2Extension ? "inkludert" : "fratrukket"}
+        </div>
+      )}
       <div className="container-layer">
         {room.visualSlots.map((slot) => <ContainerFootprint key={slot.key} model={model} slot={slot} />)}
       </div>
-      <div className="plan-room-footer">{room.totalSlots} gulvplasser · {room.rows} rader x {room.cols} lengder</div>
+      <div className="plan-room-footer">{room.grossSlots} brutto · {room.blockedSlots.length} blokkert = {room.floorSlots} gulvplasser</div>
     </article>
   );
 }
@@ -674,17 +1097,17 @@ function ContainerFootprint({ model, slot }) {
   const containerClass = renderedContainer.height < 1.2 ? "half-height" : renderedContainer.length < 4 ? "iso10" : "iso20";
   return (
     <div
-      className={`container-footprint ${containerClass} ${loadClass} ${slot.mixed ? "mixed-stack" : ""}`}
+      className={`container-footprint ${containerClass} ${loadClass} ${slot.blocked ? "slot-blocked" : ""} ${slot.mixed ? "mixed-stack" : ""}`}
       style={{ left: `${slot.leftPct}%`, top: `${slot.topPct}%`, width: `${slot.widthPct}%`, height: `${slot.heightPct}%` }}
       title={slot.title}
     >
       <div className="container-label">
-        <span>{renderedContainer.label}{model.containerRotated ? " · 90°" : ""}</span>
+        <span>{slot.blocked ? "Blokkert plass" : `${renderedContainer.label}${model.containerRotated ? " · 90°" : ""}`}</span>
         {slot.stackCount > 1 && <strong>x{slot.stackCount}</strong>}
       </div>
-      {load ? (
+      {slot.blocked ? <span className="empty-label">blokkeres av slusefelt</span> : load ? (
         <div className="payload-layer">
-          {Array.from({ length: Math.min(load.perContainer, 24) }).map((_, index) => (
+          {Array.from({ length: Math.min(slot.packageCount ?? load.perContainer, 24) }).map((_, index) => (
             <span
               key={`${slot.key}-load-${index}`}
               className={`payload-symbol ${load.shareKey} ${load.key}`}
@@ -760,42 +1183,43 @@ function buildFloorStackQueue(scenarioRows, totalFloorSlots) {
   for (const row of scenarioRows) {
     if (!Number.isFinite(row.containersNeeded) || row.perContainer <= 0) continue;
     let remaining = row.containersNeeded;
+    let remainingPackages = Math.ceil(row.packagesNeeded);
     while (remaining > 0 && queue.length < totalFloorSlots) {
       const stackCount = Math.min(row.stackLevels, remaining);
-      queue.push({ load: row, stackCount });
+      const packageCount = Math.min(row.perContainer, remainingPackages);
+      queue.push({ load: row, stackCount, packageCount });
       remaining -= stackCount;
+      remainingPackages = Math.max(0, remainingPackages - row.perContainer * stackCount);
     }
     if (queue.length >= totalFloorSlots) break;
   }
   return queue;
 }
 
-function buildRoomVisualSlots({ room, container, containerPlacement, containerRotated, wallClearance, aisleGap, visualQueue, offset }) {
+function buildRoomVisualSlots({ room, container, containerRotated, visualQueue, offset }) {
   const slots = [];
   let nextOffset = offset;
-  for (let col = 0; col < room.cols; col += 1) {
-    for (let row = 0; row < room.rows; row += 1) {
-      if (slots.length >= room.floorSlots) break;
-      const stack = visualQueue[nextOffset] || null;
-      nextOffset += 1;
-      const load = stack?.load || null;
-      const xMeters = wallClearance + row * (containerPlacement.width + aisleGap);
-      const yFromBottom = wallClearance + col * (containerPlacement.length + aisleGap);
-      const topMeters = room.displayLength - yFromBottom - containerPlacement.length;
-      slots.push({
-        key: `${room.key}-${col}-${row}`,
-        load,
-        stackCount: stack?.stackCount || 0,
-        mixed: false,
-        leftPct: (xMeters / room.width) * 100,
-        topPct: (Math.max(0, topMeters) / room.displayLength) * 100,
-        widthPct: (containerPlacement.width / room.width) * 100,
-        heightPct: (containerPlacement.length / room.displayLength) * 100,
-        title: load
-          ? `${load.containerChoice.label}${containerRotated ? " · 90° i lageret" : ""}: ${load.perContainer} ${load.label.toLowerCase()} per container, ${stack.stackCount} nivå(er)`
+  for (const geometricSlot of room.geometricSlots) {
+    const stack = geometricSlot.blocked ? null : visualQueue[nextOffset] || null;
+    if (!geometricSlot.blocked) nextOffset += 1;
+    const load = stack?.load || null;
+    const topMeters = room.displayLength - geometricSlot.y - geometricSlot.length;
+    slots.push({
+      ...geometricSlot,
+      load,
+      stackCount: stack?.stackCount || 0,
+      packageCount: stack?.packageCount || 0,
+      mixed: false,
+      leftPct: (geometricSlot.x / room.width) * 100,
+      topPct: (Math.max(0, topMeters) / room.displayLength) * 100,
+      widthPct: (geometricSlot.width / room.width) * 100,
+      heightPct: (geometricSlot.length / room.displayLength) * 100,
+      title: geometricSlot.blocked
+        ? `${container.label}: blokkeres av ${geometricSlot.blockedBy.label.toLowerCase()}`
+        : load
+          ? `${load.containerChoice.label}${containerRotated ? " · 90° i lageret" : ""}: ${stack.packageCount} ${load.label.toLowerCase()} i vist container, ${stack.stackCount} nivå(er)`
           : `${container.label}${containerRotated ? " · 90° i lageret" : ""}: ledig plass`
-      });
-    }
+    });
   }
   return { slots, nextOffset };
 }
