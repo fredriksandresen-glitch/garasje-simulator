@@ -841,6 +841,11 @@ function getPackingStudy(container, load, orientationMode = "auto", spacing = 0.
   const volume = floorArea * container.usableHeight;
   const loadFloorArea = selected.count * selected.itemLength * selected.itemWidth;
   const loadVolume = loadFloorArea * selected.itemHeight;
+  const frontAccess = evaluateFrontAccess(container, selected);
+  const topAccess = evaluateTopAccess(container, selected);
+  const accessOptions = [frontAccess, topAccess].filter((access) => access.available);
+  const verifiedAccess = accessOptions.find((access) => access.compatible) || null;
+  const accessBlocked = compatible && accessOptions.length > 0 && accessOptions.every((access) => access.complete) && !verifiedAccess;
 
   return {
     compatible,
@@ -862,7 +867,59 @@ function getPackingStudy(container, load, orientationMode = "auto", spacing = 0.
     floorAreaUtilization: compatible ? (loadFloorArea / floorArea) * 100 : 0,
     volumeUtilization: compatible ? (loadVolume / volume) * 100 : 0,
     criticalClearance: compatible ? Math.min(selected.clearanceLength, selected.clearanceWidth, selected.clearanceHeight) : Math.min(selected.clearanceLength, selected.clearanceWidth, selected.clearanceHeight),
-    reason: compatible ? "Lasten passer innenfor containerens innvendige mål." : `Passer ikke på grunn av ${failures.length ? failures.join(" og ") : "tilgjengelig pakkeflate"}.`
+    reason: compatible ? "Lasten passer innenfor containerens innvendige mål." : `Passer ikke på grunn av ${failures.length ? failures.join(" og ") : "tilgjengelig pakkeflate"}.`,
+    frontAccess,
+    topAccess,
+    verifiedAccess,
+    accessBlocked
+  };
+}
+
+function evaluateFrontAccess(container, selected) {
+  const available = Number.isFinite(container.doorOpeningWidth) || Number.isFinite(container.doorOpeningHeight);
+  const complete = Number.isFinite(container.doorOpeningWidth) && Number.isFinite(container.doorOpeningHeight);
+  if (!available) return { key: "front", label: "Frontdør", available: false, complete: false, compatible: null };
+  const widthClearance = Number.isFinite(container.doorOpeningWidth) ? container.doorOpeningWidth - selected.itemWidth : null;
+  const heightClearance = Number.isFinite(container.doorOpeningHeight) ? container.doorOpeningHeight - selected.itemHeight : null;
+  const compatible = complete ? widthClearance >= 0 && heightClearance >= 0 : null;
+  return {
+    key: "front",
+    label: "Frontdør",
+    available,
+    complete,
+    compatible,
+    widthClearance,
+    heightClearance,
+    criticalClearance: complete ? Math.min(widthClearance, heightClearance) : null,
+    reason: !complete
+      ? "Åpningsmål er ufullstendige."
+      : compatible
+        ? "Lasten kan føres inn gjennom frontdøren i valgt orientering."
+        : `Kan ikke frontlastes: ${[widthClearance < 0 && "bredden", heightClearance < 0 && "høyden"].filter(Boolean).join(" og ")} overskrider åpningen.`
+  };
+}
+
+function evaluateTopAccess(container, selected) {
+  const available = Number.isFinite(container.topOpeningLength) || Number.isFinite(container.topOpeningWidth);
+  const complete = Number.isFinite(container.topOpeningLength) && Number.isFinite(container.topOpeningWidth);
+  if (!available) return { key: "top", label: "Toppåpning", available: false, complete: false, compatible: null };
+  const lengthClearance = Number.isFinite(container.topOpeningLength) ? container.topOpeningLength - selected.itemLength : null;
+  const widthClearance = Number.isFinite(container.topOpeningWidth) ? container.topOpeningWidth - selected.itemWidth : null;
+  const compatible = complete ? lengthClearance >= 0 && widthClearance >= 0 : null;
+  return {
+    key: "top",
+    label: "Toppåpning",
+    available,
+    complete,
+    compatible,
+    lengthClearance,
+    widthClearance,
+    criticalClearance: complete ? Math.min(lengthClearance, widthClearance) : null,
+    reason: !complete
+      ? "Åpningsmål er ufullstendige."
+      : compatible
+        ? "Lasten kan senkes gjennom toppåpningen i valgt orientering."
+        : `Kan ikke topplastes: ${[lengthClearance < 0 && "lengden", widthClearance < 0 && "bredden"].filter(Boolean).join(" og ")} overskrider åpningen.`
   };
 }
 
@@ -877,13 +934,16 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
   const load = loadTypes[studyLoadKey] || loadTypes.steel1;
   const result = useMemo(() => getPackingStudy(container, load, studyOrientation, studySpacing), [container, load, studyOrientation, studySpacing]);
   const isTight = result.compatible && result.criticalClearance < 0.05;
+  const isOpeningTight = [result.frontAccess, result.topAccess].some((access) => access.compatible && access.criticalClearance < 0.05);
   const updateCustomDimension = (field, value) => setCustomStudyContainer((current) => ({ ...current, [field]: value }));
 
   return (
     <section className="container-study dark-study">
       <div className="study-heading">
         <div><p className="eyebrow">Ren pakkestudie</p><h2>Last i container</h2><p>Innvendige containermål, kollimål og praktiske klaringer – helt uavhengig av lagerbygget.</p></div>
-        <div className={`study-status ${result.compatible ? "fits" : "fails"}`}>{result.compatible ? "Passer" : "Passer ikke"}</div>
+        <div className={`study-status ${!result.compatible || result.accessBlocked ? "fails" : "fits"}`}>
+          {!result.compatible ? "Passer ikke" : result.accessBlocked ? "Innlasting stopper" : result.verifiedAccess ? "Passer og kan lastes" : "Passer innvendig"}
+        </div>
       </div>
 
       <div className="study-layout">
@@ -908,7 +968,8 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
             <label><small>Bredde (m)</small><input type="number" min="0.1" step="0.001" value={customStudyContainer.usableWidth} onChange={(event) => updateCustomDimension("usableWidth", event.target.value)} /></label>
             <label><small>Høyde (m)</small><input type="number" min="0.1" step="0.001" value={customStudyContainer.usableHeight} onChange={(event) => updateCustomDimension("usableHeight", event.target.value)} /></label>
           </div>}
-          <label className="study-field"><span>Lasttype</span><select value={studyLoadKey} onChange={(event) => setStudyLoadKey(event.target.value)}>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+          <label className="study-field"><span>Lasttype</span><select value={studyLoadKey} onChange={(event) => setStudyLoadKey(event.target.value)}>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label} · {item.dimensions}</option>)}</select></label>
+          <div className="study-load-dimensions"><span>Valgt lastmål</span><strong>L {load.size.length.toFixed(3)} × B {load.size.width.toFixed(3)} × H {load.size.height.toFixed(3)} m</strong><small>{load.dimensions}</small></div>
           <div className="study-field"><span>Orientering</span><div className="study-segments">{Object.entries(studyOrientationOptions).map(([key, item]) => <button type="button" key={key} className={studyOrientation === key ? "active" : ""} onClick={() => setStudyOrientation(key)}>{item.label}</button>)}</div></div>
           <label className="study-field study-slider"><span><span>Avstand mellom kolli</span><strong>{studySpacing.toFixed(2)} m</strong></span><input type="range" min="0" max="0.5" step="0.01" value={studySpacing} onChange={(event) => setStudySpacing(Number(event.target.value))} /></label>
           <div className="study-dimensions">
@@ -937,13 +998,14 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
         <article className={isTight ? "tight" : ""}><span>Kritisk minste klaring</span><strong>{formatStudyMeasure(result.criticalClearance)}</strong><small>{result.compatible ? "total restklaring" : "negativ verdi betyr konflikt"}</small></article>
       </div>
 
+      <LoadingAccessPanel result={result} container={container} load={load} isOpeningTight={isOpeningTight} />
       <ClearancePanel result={result} isTight={isTight} />
     </section>
   );
 }
 
 function Container3DView({ container, load, result, spacing }) {
-  const resetKey = `${container.usableLength}-${container.usableHeight}-${load.packKey}-${result.selectedOrientation}`;
+  const resetKey = `${container.usableLength}-${container.usableHeight}-${load.size.length}-${load.size.width}-${load.size.height}-${result.selectedOrientation}`;
 
   return (
     <div className={`study-webgl ${result.compatible ? "" : "incompatible"}`}>
@@ -956,6 +1018,32 @@ function Container3DView({ container, load, result, spacing }) {
       {!result.compatible && <div className="study-no-fit"><AlertTriangle size={26} /><strong>Passer ikke</strong><span>{result.reason}</span></div>}
     </div>
   );
+}
+
+function LoadingAccessPanel({ result, container, load, isOpeningTight }) {
+  const accessOptions = [result.frontAccess, result.topAccess].filter((access) => access.available);
+  if (accessOptions.length === 0) {
+    return <section className="access-panel unknown"><div><h3>Innlastingsåpning</h3><p>Åpningsmål er ikke registrert for denne containeren. Innvendig passform er beregnet, men selve innlastingen er ikke verifisert.</p></div></section>;
+  }
+
+  return (
+    <section className={`access-panel ${result.accessBlocked ? "blocked" : ""}`}>
+      <div className="access-heading">
+        <div><h3>Innlastingskontroll</h3><p>{container.drawingBased ? "Åpningsmål fra leverandørens GA-tegning." : "Kontroll mot registrerte åpningsmål."}</p></div>
+        <strong>{result.verifiedAccess ? `${result.verifiedAccess.label} kan brukes` : result.accessBlocked ? "Ingen registrert åpning passer" : "Må verifiseres"}</strong>
+      </div>
+      <div className="access-grid">
+        {accessOptions.map((access) => <AccessResult key={access.key} access={access} />)}
+      </div>
+      {load.shortLabel === "V3" && container.drawingBased && result.topAccess.compatible && <div className="tight-warning"><AlertTriangle size={18} />V3 kan ikke gå gjennom frontdøren i stående orientering. Topplasting er nominelt mulig, men {Math.round(result.topAccess.lengthClearance * 1000)} mm lengdeklaring må verifiseres mot toleranser, løfteredskap og faktisk innføringsvinkel.</div>}
+      {isOpeningTight && load.shortLabel !== "V3" && <div className="tight-warning"><AlertTriangle size={18} />Minste åpningsklaring er under 50 mm og må verifiseres mot toleranser og innlastingsmetode.</div>}
+    </section>
+  );
+}
+
+function AccessResult({ access }) {
+  const status = !access.complete ? "Ufullstendige data" : access.compatible ? "Passer" : "Passer ikke";
+  return <article className={!access.complete ? "unknown" : access.compatible ? "fits" : "fails"}><span>{access.label}</span><strong>{status}</strong><small>{access.reason}</small>{access.key === "front" && <div><span>Breddeklaring</span><b>{formatOptionalStudyMeasure(access.widthClearance)}</b><span>Høydeklaring</span><b>{formatOptionalStudyMeasure(access.heightClearance)}</b></div>}{access.key === "top" && <div><span>Lengdeklaring</span><b>{formatOptionalStudyMeasure(access.lengthClearance)}</b><span>Breddeklaring</span><b>{formatOptionalStudyMeasure(access.widthClearance)}</b></div>}</article>;
 }
 
 class ThreeErrorBoundary extends React.Component {
@@ -971,6 +1059,7 @@ function ClearancePanel({ result, isTight }) {
 
 function ClearanceValue({ label, value }) { return <div className={value < 0.05 ? "tight" : ""}><span>{label}</span><strong>{formatStudyMeasure(value)}</strong></div>; }
 function formatStudyMeasure(value) { return `${value.toFixed(3)} m / ${Math.round(value * 1000)} mm`; }
+function formatOptionalStudyMeasure(value) { return Number.isFinite(value) ? formatStudyMeasure(value) : "Ikke oppgitt"; }
 
 function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
   return (

@@ -1,6 +1,6 @@
 import React from "react";
 import { Canvas } from "@react-three/fiber";
-import { Edges, OrbitControls } from "@react-three/drei";
+import { Edges, Html, Line, OrbitControls } from "@react-three/drei";
 
 export default function Container3DView({ container, load, result, spacing }) {
   const maxDim = Math.max(container.usableLength, container.usableWidth, container.usableHeight);
@@ -14,9 +14,104 @@ export default function Container3DView({ container, load, result, spacing }) {
       <directionalLight position={[4, 7, 5]} intensity={2.2} castShadow />
       <ContainerMesh container={container} />
       {result.compatible && <CargoGrid load={load} result={result} spacing={spacing} />}
+      {result.compatible && <ClearanceGuides container={container} load={load} result={result} />}
+      {result.compatible && <OpeningComparison container={container} result={result} />}
       <OrbitControls makeDefault target={[0, container.usableHeight * 0.34, 0]} enableDamping dampingFactor={0.08} minDistance={maxDim * 0.7} maxDistance={maxDim * 4.5} maxPolarAngle={Math.PI * 0.49} />
     </Canvas>
   );
+}
+
+function ClearanceGuides({ container, load, result }) {
+  const widthStart = result.usedWidth / 2;
+  const widthEnd = container.usableWidth / 2;
+  const lengthStart = result.usedLength / 2;
+  const lengthEnd = container.usableLength / 2;
+  const guideY = Math.min(container.usableHeight - 0.04, result.usedHeight + 0.12);
+  const labelY = Math.min(container.usableHeight - 0.03, result.usedHeight + 0.2);
+
+  return (
+    <group>
+      <MeasureLine
+        start={[widthStart, guideY, -result.usedLength / 2]}
+        end={[widthEnd, guideY, -result.usedLength / 2]}
+        label={`Side ${formatMm(result.widthClearancePerSide)}`}
+      />
+      <MeasureLine
+        start={[-result.usedWidth / 2, 0.08, lengthStart]}
+        end={[-result.usedWidth / 2, 0.08, lengthEnd]}
+        label={`Ende ${formatMm(result.lengthClearancePerSide)}`}
+      />
+      <MeasureLine
+        start={[Math.min(widthEnd - 0.05, result.usedWidth / 2 + 0.08), result.usedHeight, result.usedLength / 2]}
+        end={[Math.min(widthEnd - 0.05, result.usedWidth / 2 + 0.08), container.usableHeight, result.usedLength / 2]}
+        label={`Over ${formatMm(result.heightClearanceTop)}`}
+      />
+      <SceneLabel position={[0, labelY, 0]} tone="load">
+        {load.shortLabel}: {formatMm(result.itemLength)} × {formatMm(result.itemWidth)} × {formatMm(result.usedHeight)}
+      </SceneLabel>
+    </group>
+  );
+}
+
+function OpeningComparison({ container, result }) {
+  const { usableWidth: width, usableHeight: height, usableLength: length } = container;
+  const top = result.topAccess;
+  const front = result.frontAccess;
+
+  return (
+    <group>
+      {top.complete && <group>
+        <RectangleLine width={container.topOpeningWidth} height={container.topOpeningLength} position={[0, height + 0.035, 0]} rotation={[Math.PI / 2, 0, 0]} color="#f6b84a" />
+        <RectangleLine width={result.itemWidth} height={result.itemLength} position={[0, height + 0.055, 0]} rotation={[Math.PI / 2, 0, 0]} color={top.compatible ? "#69d4ff" : "#ff725f"} />
+        <SceneLabel position={[0, height + 0.13, -container.topOpeningLength / 2]} tone={top.compatible ? "ok" : "bad"}>
+          Topp: L {formatSignedMm(top.lengthClearance)} · B {formatSignedMm(top.widthClearance)}
+        </SceneLabel>
+      </group>}
+      {front.complete && <group>
+        <RectangleLine width={container.doorOpeningWidth} height={container.doorOpeningHeight} position={[0, container.doorOpeningHeight / 2, length / 2 + 0.035]} color="#f6b84a" />
+        <RectangleLine width={result.itemWidth} height={result.usedHeight} position={[0, result.usedHeight / 2, length / 2 + 0.055]} color={front.compatible ? "#69d4ff" : "#ff725f"} />
+        <SceneLabel position={[0, Math.max(container.doorOpeningHeight, result.usedHeight) + 0.13, length / 2 + 0.08]} tone={front.compatible ? "ok" : "bad"}>
+          Front: B {formatSignedMm(front.widthClearance)} · H {formatSignedMm(front.heightClearance)}
+        </SceneLabel>
+      </group>}
+    </group>
+  );
+}
+
+function RectangleLine({ width, height, position, rotation = [0, 0, 0], color }) {
+  const points = [
+    [-width / 2, -height / 2, 0],
+    [width / 2, -height / 2, 0],
+    [width / 2, height / 2, 0],
+    [-width / 2, height / 2, 0],
+    [-width / 2, -height / 2, 0]
+  ];
+  return <Line points={points} position={position} rotation={rotation} color={color} lineWidth={2.2} />;
+}
+
+function MeasureLine({ start, end, label }) {
+  const midpoint = start.map((value, index) => (value + end[index]) / 2);
+  return <group><Line points={[start, end]} color="#e8f0a2" lineWidth={2} /><SceneLabel position={midpoint} tone="measure">{label}</SceneLabel></group>;
+}
+
+function SceneLabel({ position, tone, children }) {
+  const tones = {
+    measure: { border: "#b6c75a", color: "#f4fac6", background: "rgba(18,31,27,.92)" },
+    load: { border: "#52a7d3", color: "#d8f2ff", background: "rgba(12,31,42,.92)" },
+    ok: { border: "#4fb897", color: "#d9fff3", background: "rgba(13,43,35,.92)" },
+    bad: { border: "#d76554", color: "#ffe4df", background: "rgba(57,24,22,.94)" }
+  };
+  const palette = tones[tone] || tones.measure;
+  return <Html center position={position} distanceFactor={5.5} style={{ pointerEvents: "none" }}><span style={{ display: "block", whiteSpace: "nowrap", padding: "3px 6px", border: `1px solid ${palette.border}`, borderRadius: "4px", color: palette.color, background: palette.background, fontSize: "11px", fontWeight: 800 }}>{children}</span></Html>;
+}
+
+function formatMm(value) {
+  return `${Math.round(value * 1000)} mm`;
+}
+
+function formatSignedMm(value) {
+  const millimeters = Math.round(value * 1000);
+  return `${millimeters >= 0 ? "+" : ""}${millimeters} mm`;
 }
 
 function ContainerMesh({ container }) {
