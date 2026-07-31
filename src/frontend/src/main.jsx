@@ -1113,6 +1113,7 @@ function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
         <span><i className="legend-kokille" />Kokiller</span>
         <span><i className="legend-blocked" />Gule felt</span>
         <span><i className="legend-extension" />Utvidet areal</span>
+        <span className="plan-scale-note">Arkitektens utvendige byggmål: B 36 200 × L 36 000 mm. Planmodellen viser innvendig lagergeometri: B 34 200 × maks L 34 000 mm.</span>
         <span className="plan-scale-note">Containere vises med utvendig L × B i samme målestokk som lageret.</span>
       </div>
     </div>
@@ -1131,7 +1132,7 @@ function PlanDimensions({ model }) {
     <div className="plan-measure horizontal width-segment" style={{ left: 0, width: `${separatorLeft}%` }}><span>16 850 mm</span></div>
     <div className="plan-measure horizontal width-segment separator-measure" style={{ left: `${separatorLeft}%`, width: `${separatorWidthPct}%` }}><span>500</span></div>
     <div className="plan-measure horizontal width-segment" style={{ left: `${lager2Left}%`, width: `${lager2.widthPct}%` }}><span>16 850 mm</span></div>
-    <div className="plan-measure horizontal overall-width"><span>Total bredde 34 200 mm</span></div>
+    <div className="plan-measure horizontal overall-width"><span>Innvendig lagerbredde 34 200 mm</span></div>
     <div className="plan-measure vertical lager1-length" style={{ top: `${lager1.topPct}%`, height: `${lager1.heightPct}%` }}><span>Lager 1: 24 115 mm</span></div>
     <div className="plan-measure vertical lager2-length"><span>Lager 2: 34 000 mm</span></div>
     <div className="plan-measure vertical lager2-base-length" style={{ top: `${lager2BaseTop}%`, height: `${100 - lager2BaseTop}%` }}><span>Basis 29 000 mm</span></div>
