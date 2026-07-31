@@ -1098,11 +1098,12 @@ function formatSceneMillimeters(value, signed = false) { const millimeters = Mat
 function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
   return (
     <div className="plan-shell">
-      <div className="plan-canvas" style={{ aspectRatio: `${model.planWidth} / ${model.planLength}` }}>
-        <div className="dimension dimension-width">16 850 mm + 500 mm + 16 850 mm</div>
-        <div className="dimension dimension-height">Lager 2: {model.planLength.toFixed(0)} m</div>
-        {model.roomModels.map((room) => <PlanRoom key={room.key} room={room} model={model} />)}
-        <div className="separator" style={{ left: `${(16.85 / model.planWidth) * 100}%`, width: `${(separatorWidth / model.planWidth) * 100}%` }} />
+      <div className="plan-canvas">
+        <div className="plan-geometry" style={{ aspectRatio: `${model.planWidth} / ${model.planLength}` }}>
+          {model.roomModels.map((room) => <PlanRoom key={room.key} room={room} model={model} />)}
+          <div className="separator" style={{ left: `${(16.85 / model.planWidth) * 100}%`, width: `${(separatorWidth / model.planWidth) * 100}%` }} />
+          <PlanDimensions model={model} />
+        </div>
       </div>
       <div className="plan-legend">
         <span><i className="legend-storage" />Lagerareal</span>
@@ -1112,15 +1113,36 @@ function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
         <span><i className="legend-kokille" />Kokiller</span>
         <span><i className="legend-blocked" />Gule felt</span>
         <span><i className="legend-extension" />Utvidet areal</span>
+        <span className="plan-scale-note">Containere vises med utvendig L × B i samme målestokk som lageret.</span>
       </div>
     </div>
   );
 }
 
+function PlanDimensions({ model }) {
+  const lager1 = model.roomModels.find((room) => room.key === "lager1");
+  const lager2 = model.roomModels.find((room) => room.key === "lager2");
+  const separatorLeft = (16.85 / model.planWidth) * 100;
+  const separatorWidthPct = (separatorWidth / model.planWidth) * 100;
+  const lager2Left = ((16.85 + separatorWidth) / model.planWidth) * 100;
+  const lager2BaseTop = ((lager2.displayLength - lager2.usableLength) / lager2.displayLength) * 100;
+
+  return <div className="plan-measures" aria-label="Mållinjer for lagerbygget">
+    <div className="plan-measure horizontal width-segment" style={{ left: 0, width: `${separatorLeft}%` }}><span>16 850 mm</span></div>
+    <div className="plan-measure horizontal width-segment separator-measure" style={{ left: `${separatorLeft}%`, width: `${separatorWidthPct}%` }}><span>500</span></div>
+    <div className="plan-measure horizontal width-segment" style={{ left: `${lager2Left}%`, width: `${lager2.widthPct}%` }}><span>16 850 mm</span></div>
+    <div className="plan-measure horizontal overall-width"><span>Total bredde 34 200 mm</span></div>
+    <div className="plan-measure vertical lager1-length" style={{ top: `${lager1.topPct}%`, height: `${lager1.heightPct}%` }}><span>Lager 1: 24 115 mm</span></div>
+    <div className="plan-measure vertical lager2-length"><span>Lager 2: 34 000 mm</span></div>
+    <div className="plan-measure vertical lager2-base-length" style={{ top: `${lager2BaseTop}%`, height: `${100 - lager2BaseTop}%` }}><span>Basis 29 000 mm</span></div>
+    <div className="plan-measure vertical lager2-extension-length" style={{ height: `${lager2BaseTop}%` }}><span>Rosa 5 000 mm</span></div>
+  </div>;
+}
+
 function PlanRoom({ room, model }) {
   return (
     <article className={`plan-room ${room.key}`} style={{ left: `${room.leftPct}%`, top: `${room.topPct}%`, width: `${room.widthPct}%`, height: `${room.heightPct}%` }}>
-      <div className="plan-room-header"><strong>{room.label}</strong><span>{room.width.toFixed(2)} x {room.displayLength.toFixed(2)} m</span></div>
+      <div className="plan-room-header"><strong>{room.label}</strong><span>B {room.width.toFixed(3)} × L {room.displayLength.toFixed(3)} m</span></div>
       <div
         className="clearance-frame"
         style={{
@@ -1278,7 +1300,14 @@ function buildRoomVisualSlots({ room, container, containerRotated, visualQueue, 
     const stack = geometricSlot.blocked ? null : visualQueue[nextOffset] || null;
     if (!geometricSlot.blocked) nextOffset += 1;
     const load = stack?.load || null;
-    const topMeters = room.displayLength - geometricSlot.y - geometricSlot.length;
+    const renderedContainer = load?.containerChoice || container;
+    const renderedPlacement = containerRotated
+      ? { width: renderedContainer.length, length: renderedContainer.width }
+      : { width: renderedContainer.width, length: renderedContainer.length };
+    const displayedWidth = geometricSlot.blocked ? geometricSlot.width : renderedPlacement.width;
+    const displayedLength = geometricSlot.blocked ? geometricSlot.length : renderedPlacement.length;
+    const topMeters = room.displayLength - geometricSlot.y - displayedLength;
+    const footprintText = `utvendig L ${renderedContainer.length.toFixed(3)} × B ${renderedContainer.width.toFixed(3)} m`;
     slots.push({
       ...geometricSlot,
       load,
@@ -1287,13 +1316,13 @@ function buildRoomVisualSlots({ room, container, containerRotated, visualQueue, 
       mixed: false,
       leftPct: (geometricSlot.x / room.width) * 100,
       topPct: (Math.max(0, topMeters) / room.displayLength) * 100,
-      widthPct: (geometricSlot.width / room.width) * 100,
-      heightPct: (geometricSlot.length / room.displayLength) * 100,
+      widthPct: (displayedWidth / room.width) * 100,
+      heightPct: (displayedLength / room.displayLength) * 100,
       title: geometricSlot.blocked
         ? `${container.label}: blokkeres av ${geometricSlot.blockedBy.label.toLowerCase()}`
         : load
-          ? `${load.containerChoice.label}${containerRotated ? " · 90° i lageret" : ""}: ${stack.packageCount} ${load.label.toLowerCase()} i vist container, ${stack.stackCount} nivå(er)`
-          : `${container.label}${containerRotated ? " · 90° i lageret" : ""}: ledig plass`
+          ? `${load.containerChoice.label}${containerRotated ? " · 90° i lageret" : ""}, ${footprintText}: ${stack.packageCount} ${load.label.toLowerCase()} i vist container, ${stack.stackCount} nivå(er)`
+          : `${container.label}${containerRotated ? " · 90° i lageret" : ""}, ${footprintText}: ledig plass`
     });
   }
   return { slots, nextOffset };

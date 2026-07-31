@@ -73,7 +73,8 @@ input[type="range"] { width: 100%; accent-color: #286b52; }
 .stage-header p { color: #657068; font-size: .9rem; font-weight: 650; }
 .capacity-pill { display: inline-flex; align-items: center; padding: 11px 14px; font-weight: 850; white-space: nowrap; }
 .plan-shell { display: grid; gap: 10px; }
-.plan-canvas { position: relative; width: 100%; min-height: 560px; border: 1px solid #9ca79f; border-radius: 8px; background: linear-gradient(90deg, rgba(67,78,70,.1) 1px, transparent 1px), linear-gradient(rgba(67,78,70,.1) 1px, transparent 1px), #f2efe7; background-size: 26px 26px; overflow: hidden; }
+.plan-canvas { position: relative; width: 100%; min-height: 560px; border: 1px solid #9ca79f; border-radius: 8px; background: #f2efe7; padding: 34px 58px 58px; overflow: hidden; }
+.plan-geometry { position: relative; width: 100%; background: linear-gradient(90deg, rgba(67,78,70,.1) 1px, transparent 1px), linear-gradient(rgba(67,78,70,.1) 1px, transparent 1px), #f2efe7; background-size: 26px 26px; }
 .plan-room { position: absolute; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; border: 2px solid #6f7a72; background: rgba(248,249,246,.82); padding: 10px; overflow: hidden; }
 .plan-room-header, .plan-room-footer { position: relative; z-index: 2; display: flex; justify-content: space-between; gap: 8px; color: #243329; font-size: .85rem; font-weight: 850; }
 .plan-room-header span, .plan-room-footer { color: #5c665f; font-weight: 750; }
@@ -106,12 +107,30 @@ input[type="range"] { width: 100%; accent-color: #286b52; }
 .payload-symbol.kokille { border-radius: 3px; background: #69a86b; }
 .empty-label { position: absolute; inset: auto 3px 3px; color: #6e7870; font-size: .52rem; font-weight: 800; text-align: center; }
 .separator { position: absolute; top: 0; bottom: 0; background: #768078; opacity: .55; }
-.dimension { position: absolute; z-index: 6; color: #25342b; font-size: .78rem; font-weight: 900; background: rgba(255,255,255,.82); border: 1px solid #cfd6d0; border-radius: 5px; padding: 4px 7px; }
-.dimension-width { left: 50%; bottom: 8px; transform: translateX(-50%); }
-.dimension-height { right: 8px; top: 50%; transform: translateY(-50%) rotate(90deg); transform-origin: center; }
+.plan-measures { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.plan-measure { position: absolute; color: #34443a; font-size: .66rem; font-weight: 900; line-height: 1; }
+.plan-measure span { position: absolute; padding: 2px 4px; border-radius: 3px; background: rgba(242,239,231,.94); white-space: nowrap; }
+.plan-measure.horizontal { height: 1px; border-top: 1px solid #65736a; }
+.plan-measure.horizontal::before, .plan-measure.horizontal::after { content: ""; position: absolute; top: -5px; height: 10px; border-left: 1px solid #65736a; }
+.plan-measure.horizontal::before { left: 0; }
+.plan-measure.horizontal::after { right: 0; }
+.plan-measure.horizontal span { left: 50%; top: 4px; transform: translateX(-50%); }
+.width-segment { bottom: -17px; }
+.overall-width { left: 0; bottom: -39px; width: 100%; }
+.separator-measure span { font-size: .57rem; }
+.plan-measure.vertical { width: 1px; border-left: 1px solid #65736a; }
+.plan-measure.vertical::before, .plan-measure.vertical::after { content: ""; position: absolute; left: -5px; width: 10px; border-top: 1px solid #65736a; }
+.plan-measure.vertical::before { top: 0; }
+.plan-measure.vertical::after { bottom: 0; }
+.plan-measure.vertical span { left: 5px; top: 50%; transform: translateY(-50%) rotate(-90deg); transform-origin: left center; }
+.lager1-length { left: -18px; }
+.lager2-length { right: -18px; top: 0; height: 100%; }
+.lager2-base-length { right: -39px; }
+.lager2-extension-length { right: -39px; top: 0; }
 .plan-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; color: #526058; font-size: .85rem; font-weight: 800; }
 .plan-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .plan-legend i { width: 14px; height: 10px; display: inline-block; border: 1px solid #8c978f; border-radius: 2px; }
+.plan-legend .plan-scale-note { flex-basis: 100%; color: #68736c; font-size: .75rem; font-weight: 700; }
 .legend-storage { background: #dfe6df; }
 .legend-container { background: #e3e8e2; }
 .legend-drum { background: #d9a441; border-radius: 999px; }
@@ -244,6 +263,6 @@ input[type="range"] { width: 100%; accent-color: #286b52; }
 .warning.warn { border: 1px solid #c19a48; background: #fff8e9; color: #68480d; }
 .warning.ok { border: 1px solid #4c8a68; background: #edf8f1; color: #20553a; }
 @media (max-width: 1200px) { .constraint-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 1060px) { .workspace { grid-template-columns: 1fr; } .controls { max-height: none; position: static; } .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .plan-canvas { min-height: 460px; } }
+@media (max-width: 1060px) { .workspace { grid-template-columns: 1fr; } .controls { max-height: none; position: static; } .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .plan-canvas { min-height: 460px; padding-inline: 50px; } }
 @media (max-width: 980px) { .study-layout { grid-template-columns: 1fr; } .study-results, .clearance-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 680px) { .app-shell { padding: 12px; } .topbar, .stage-header, .study-heading, .access-heading { display: grid; } .summary-grid, .segments, .constraint-panel, .study-results, .clearance-grid, .study-custom-container, .study-selection-options, .access-grid { grid-template-columns: 1fr; } .access-heading > strong { text-align: left; } .table-row { grid-template-columns: 1fr; } h1 { font-size: 2.1rem; } .tooltip { right: auto; left: -120px; width: 240px; } .plan-canvas { min-height: 360px; } .plan-room-header, .plan-room-footer, .room-obstruction, .room-extension, .dimension { font-size: .62rem; } .container-study { padding: 14px; } .study-visual-panel { min-height: 340px; padding: 10px; } .study-webgl { height: 285px; } .study-clearance-overlay { width: 112px; padding: 6px; font-size: .58rem; } .study-view-hint { display: none; } .study-axis, .study-load-axis { flex-wrap: wrap; } }
+@media (max-width: 680px) { .app-shell { padding: 12px; } .topbar, .stage-header, .study-heading, .access-heading { display: grid; } .summary-grid, .segments, .constraint-panel, .study-results, .clearance-grid, .study-custom-container, .study-selection-options, .access-grid { grid-template-columns: 1fr; } .access-heading > strong { text-align: left; } .table-row { grid-template-columns: 1fr; } h1 { font-size: 2.1rem; } .tooltip { right: auto; left: -120px; width: 240px; } .plan-canvas { min-height: 0; padding: 28px 42px 52px; overflow: auto; } .plan-geometry { min-width: 680px; } .plan-room-header, .plan-room-footer, .room-obstruction, .room-extension, .plan-measure { font-size: .56rem; } .lager2-base-length, .lager2-extension-length { display: none; } .container-study { padding: 14px; } .study-visual-panel { min-height: 340px; padding: 10px; } .study-webgl { height: 285px; } .study-clearance-overlay { width: 112px; padding: 6px; font-size: .58rem; } .study-view-hint { display: none; } .study-axis, .study-load-axis { flex-wrap: wrap; } }
