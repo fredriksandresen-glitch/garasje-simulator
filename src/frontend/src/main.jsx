@@ -145,6 +145,9 @@ const containerTypes = {
     tare: 1350,
     topOpeningWidth: 2.230,
     topOpeningLength: 2.713,
+    doorOpeningWidth: 2.338,
+    doorOpeningHeight: 1.042,
+    doorOpeningTolerance: 0.0005,
     payloadEstimateMin: 8000,
     payloadEstimateMax: 10000,
     hardTop: true,
@@ -977,7 +980,7 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
             <span>Utvendig container</span><strong>L {container.length.toFixed(3)} × B {container.width.toFixed(3)} × H {container.height.toFixed(3)} m</strong>
             <span>Innvendig container</span><strong>L {container.usableLength.toFixed(3)} × B {container.usableWidth.toFixed(3)} × H {container.usableHeight.toFixed(3)} m</strong>
             {(container.topOpeningLength || container.topOpeningWidth) && <><span>Top opening</span><strong>{container.topOpeningLength ? `L ${container.topOpeningLength.toFixed(3)} × ` : ""}B {container.topOpeningWidth.toFixed(3)} m</strong></>}
-            {(container.doorOpeningWidth || container.doorOpeningHeight) && <><span>Døråpning</span><strong>B {container.doorOpeningWidth.toFixed(3)} × H {container.doorOpeningHeight.toFixed(3)} m</strong></>}
+            {(container.doorOpeningWidth || container.doorOpeningHeight) && <><span>Døråpning</span><strong>B {container.doorOpeningWidth.toFixed(3)} × H {container.doorOpeningHeight.toFixed(3)} m{Number.isFinite(container.doorOpeningTolerance) ? ` (±${(container.doorOpeningTolerance * 1000).toFixed(1)} mm)` : ""}</strong></>}
             {(container.tare || container.payload || container.maxGross) && <><span>Vektdata</span><strong>{container.tare ? `Tare ca. ${formatNumber(container.tare)} kg` : ""}{container.payload ? ` · Payload ca. ${formatNumber(container.payload)} kg` : ""}{container.maxGross ? ` · Max gross ca. ${formatNumber(container.maxGross)} kg` : ""}</strong></>}
             {container.topOpeningWidth && <><span>Hard-top geometri</span><strong>{container.hardTop ? "Toppinnbygginger er vist i 3D med toppramme, lip, nedheng og skrå støtte." : "Innvendig mål gjelder gulv-/pakkemål. Topprammer i taksone er vist i 3D."}</strong></>}
             {container.notes && <><span>Merknad</span><strong>{container.notes}</strong></>}
@@ -1039,7 +1042,13 @@ function ClearanceOverlay({ result, container }) {
         {Number.isFinite(top.lengthClearance) && <span>Klaring L <b>{formatSceneMillimeters(top.lengthClearance, true)}</b></span>}
         {Number.isFinite(top.widthClearance) && <span>Klaring B <b>{formatSceneMillimeters(top.widthClearance, true)}</b></span>}
       </>}
-      {front.available && <><strong>Frontdør</strong>{Number.isFinite(front.widthClearance) && <span>Bredde <b>{formatSceneMillimeters(front.widthClearance, true)}</b></span>}{Number.isFinite(front.heightClearance) && <span>Høyde <b>{formatSceneMillimeters(front.heightClearance, true)}</b></span>}</>}
+      {front.available && <>
+        <strong>Frontdør</strong>
+        {Number.isFinite(container.doorOpeningWidth) && <span>Åpning B <b>{container.doorOpeningWidth.toFixed(3)} m</b></span>}
+        {Number.isFinite(container.doorOpeningHeight) && <span>Åpning H <b>{container.doorOpeningHeight.toFixed(3)} m</b></span>}
+        {Number.isFinite(front.widthClearance) && <span>Klaring B <b>{formatSceneMillimeters(front.widthClearance, true)}</b></span>}
+        {Number.isFinite(front.heightClearance) && <span>Klaring H <b>{formatSceneMillimeters(front.heightClearance, true)}</b></span>}
+      </>}
     </div>
   );
 }
