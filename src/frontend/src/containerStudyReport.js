@@ -21,7 +21,10 @@ const containerGapSeries = [0.1, 0.25, 0.5, 1];
 
 function formatNumber(value, decimals = 0) {
   if (!Number.isFinite(value)) return "Ikke oppgitt";
-  return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: decimals, minimumFractionDigits: decimals }).format(value);
+  const formatted = new Intl.NumberFormat("nb-NO", { maximumFractionDigits: decimals, minimumFractionDigits: decimals })
+    .format(Math.abs(value))
+    .replace(/[\u00a0\u202f]/g, " ");
+  return value < 0 ? `-${formatted}` : formatted;
 }
 
 function formatMeters(value, decimals = 3) {
@@ -45,6 +48,7 @@ function normalizeSettings(settings) {
     roofHeight: clampNumber(settings.roofHeight, 6, 1),
     wallClearance: clampNumber(settings.wallClearance, 0.5),
     containerGap: clampNumber(settings.containerGap, 0.25),
+    doorClearance: clampNumber(settings.doorClearance, 0.9),
     reserveAisle: settings.reserveAisle === true,
     aisleSideClearance: clampNumber(settings.aisleSideClearance, 0.5),
     topClearance: clampNumber(settings.topClearance, 0.2)
@@ -62,6 +66,30 @@ function getCertifiedStackLimit(container) {
 function getStackCount(container, roofHeight, topClearance) {
   const geometric = Math.max(0, Math.floor((roofHeight - topClearance) / container.height));
   return Math.min(geometric, getCertifiedStackLimit(container));
+}
+
+function getStackingTestLoad(container) {
+  if (Number.isFinite(container.stackingTestLoad)) return container.stackingTestLoad;
+  if (Number.isFinite(container.stackingTestLoadPerPost)) return container.stackingTestLoadPerPost;
+  return null;
+}
+
+function getLoadedStackScreening(container, row, settings) {
+  const roofLimit = getStackCount(container, settings.roofHeight, settings.topClearance);
+  const certifiedLimit = getCertifiedStackLimit(container);
+  const testLoad = getStackingTestLoad(container);
+  const loadedGrossWeight = row.loadedGrossWeight || (container.tare || 0) + row.practicalCount * row.load.defaultWeight;
+  const testLoadLimit = Number.isFinite(testLoad) && loadedGrossWeight > 0
+    ? Math.max(1, 1 + Math.floor(testLoad / loadedGrossWeight))
+    : Infinity;
+  const screenedStackHeight = Math.max(0, Math.min(roofLimit, certifiedLimit, testLoadLimit));
+  const limits = [
+    ["takhøyde", roofLimit],
+    ["sertifisert maksimum", certifiedLimit],
+    ["stacking-test screening", testLoadLimit]
+  ].filter(([, value]) => Number.isFinite(value));
+  const governing = limits.sort((a, b) => a[1] - b[1])[0]?.[0] || "takhøyde";
+  return { roofLimit, certifiedLimit, testLoadLimit, screenedStackHeight, governing, loadedGrossWeight };
 }
 
 function getWarehouseLayout(container, settings) {
@@ -142,54 +170,140 @@ function captureCanvas(visualElement) {
   }
 }
 
-function drawWarehousePlan(doc, x, y, width, height, container, settings, layout) {
-  doc.setFillColor(231, 237, 235);
-  doc.setDrawColor(93, 112, 106);
-  doc.roundedRect(x, y, width, height, 2, 2, "FD");
+function drawArchitecturalPlan(doc, x, y, width, height, data, scenario) {
+  const planWidth = data.warehouseAnalysis.planWidth;
+  const planLength = data.warehouseAnalysis.planLength;
+  const legendHeight = 13;
+  const scale = Math.min(width / planWidth, (height - legendHeight) / planLength);
+  const drawingWidth = planWidth * scale;
+  const drawingHeight = planLength * scale;
+  const planX = x + (width - drawingWidth) / 2;
+  const planY = y;
+  const toX = (value) => planX + value * scale;
+  const toY = (value, length = 0) => planY + (planLength - value - length) * scale;
 
-  const innerX = x + (settings.wallClearance / settings.warehouseLength) * width;
-  const innerY = y + (settings.wallClearance / settings.warehouseWidth) * height;
-  const innerW = Math.max(1, width - ((settings.wallClearance * 2) / settings.warehouseLength) * width);
-  const innerH = Math.max(1, height - ((settings.wallClearance * 2) / settings.warehouseWidth) * height);
-  const aisleWidth = getAisleWidth(container, settings);
-  const aisleH = Math.min(innerH * 0.7, (aisleWidth / settings.warehouseWidth) * height);
-  const aisleY = innerY + (innerH - aisleH) / 2;
+  doc.setFillColor(242, 239, 231);
+  doc.setDrawColor(156, 167, 159);
+  doc.roundedRect(planX, planY, drawingWidth, drawingHeight, 1.5, 1.5, "FD");
+  doc.setFillColor(118, 128, 120);
+  doc.rect(toX(16.85), planY, 0.5 * scale, drawingHeight, "F");
 
-  if (aisleWidth > 0) {
-    doc.setFillColor(255, 249, 226);
-    doc.rect(innerX, aisleY, innerW, aisleH, "F");
-    setText(doc, 6.5, [131, 101, 34], "bold");
-    doc.text(`Kjøregang ${formatMeters(aisleWidth, 3)}`, innerX + innerW / 2, aisleY + aisleH / 2 + 1, { align: "center" });
-  }
+  scenario.roomModels.forEach((room) => {
+    const roomX = toX(room.x);
+    const roomY = toY(0, room.displayLength);
+    const roomWidth = room.width * scale;
+    const roomHeight = room.displayLength * scale;
+    doc.setFillColor(248, 249, 246);
+    doc.setDrawColor(85, 105, 93);
+    doc.rect(roomX, roomY, roomWidth, roomHeight, "FD");
 
-  const availableBandHeight = Math.max(0, innerH - aisleH);
-  const topBandHeight = aisleWidth > 0 ? availableBandHeight / 2 : availableBandHeight;
-  const bottomBandHeight = aisleWidth > 0 ? availableBandHeight / 2 : 0;
-  const topRows = aisleWidth > 0 ? Math.ceil(layout.rows / 2) : layout.rows;
-  const bottomRows = aisleWidth > 0 ? Math.max(0, layout.rows - topRows) : 0;
-  const cellW = layout.cols > 0 ? innerW / layout.cols : innerW;
-  const maxDraw = 180;
-  let drawn = 0;
-
-  const drawBank = (rows, bankY, bankHeight) => {
-    const cellH = rows > 0 ? bankHeight / rows : bankHeight;
-    for (let row = 0; row < rows; row += 1) {
-      for (let col = 0; col < layout.cols && drawn < maxDraw; col += 1) {
-        const padX = Math.min(0.8, cellW * 0.12);
-        const padY = Math.min(0.8, cellH * 0.12);
-        doc.setFillColor(102, 177, 169);
-        doc.setDrawColor(42, 104, 99);
-        doc.roundedRect(innerX + col * cellW + padX, bankY + row * cellH + padY, Math.max(0.6, cellW - padX * 2), Math.max(0.6, cellH - padY * 2), 0.5, 0.5, "FD");
-        drawn += 1;
-      }
+    if (room.extension) {
+      const extensionY = toY(room.extension.y, room.extension.length);
+      doc.setFillColor(245, 195, 234);
+      doc.setDrawColor(177, 54, 157);
+      doc.setLineDashPattern([1, 0.8], 0);
+      doc.rect(toX(room.x + room.extension.x), extensionY, room.extension.width * scale, room.extension.length * scale, "FD");
+      doc.setLineDashPattern([], 0);
+      setText(doc, 4.8, [115, 32, 101], "bold");
+      doc.text(`Rosa felt - ${room.useLager2Extension ? "inkludert" : "fratrukket"}`, toX(room.x + room.extension.width / 2), extensionY + 4, { align: "center" });
     }
-  };
 
-  drawBank(topRows, innerY, topBandHeight);
-  drawBank(bottomRows, aisleY + aisleH, bottomBandHeight);
-  setText(doc, 6.5, colors.muted);
-  doc.text(`L ${formatMeters(settings.warehouseLength, 1)}`, x + width / 2, y + height + 4, { align: "center" });
-  doc.text(`B ${formatMeters(settings.warehouseWidth, 1)}`, x - 2, y + height / 2, { angle: 90, align: "center" });
+    (room.obstructions || []).forEach((obstruction) => {
+      const obstructionX = toX(room.x + obstruction.x);
+      const obstructionY = toY(obstruction.y, obstruction.length);
+      doc.setFillColor(246, 242, 183);
+      doc.setDrawColor(154, 133, 24);
+      doc.setLineDashPattern([1, 0.8], 0);
+      doc.rect(obstructionX, obstructionY, obstruction.width * scale, obstruction.length * scale, "FD");
+      doc.setLineDashPattern([], 0);
+      setText(doc, 4.2, [72, 70, 13], "bold");
+      const obstructionLabel = `${obstruction.label} - ${room.includeMarkedAreas ? "inkludert" : "fratrukket"}`;
+      doc.text(doc.splitTextToSize(obstructionLabel, Math.max(10, obstruction.width * scale - 2)).slice(0, 2), obstructionX + obstruction.width * scale / 2, obstructionY + 3, { align: "center" });
+    });
+
+    if (room.transportAisle) {
+      const aisleX = toX(room.x + room.transportAisle.x);
+      const aisleY = toY(room.transportAisle.y, room.transportAisle.length);
+      const aisleWidth = room.transportAisle.width * scale;
+      const aisleHeight = room.transportAisle.length * scale;
+      doc.setFillColor(222, 239, 248);
+      doc.setDrawColor(62, 112, 145);
+      doc.setLineDashPattern([1.2, 0.8], 0);
+      doc.rect(aisleX, aisleY, aisleWidth, aisleHeight, "FD");
+      doc.setLineDashPattern([], 0);
+      setText(doc, 4.6, [36, 77, 104], "bold");
+      doc.text(`Kjøregang ${formatMeters(room.transportAisle.width, 3)}`, aisleX + aisleWidth / 2, aisleY + aisleHeight / 2, { angle: 90, align: "center" });
+    }
+
+    room.geometricSlots.forEach((slot) => {
+      const slotX = toX(room.x + slot.x);
+      const slotY = toY(slot.y, slot.length);
+      const slotWidth = slot.width * scale;
+      const slotHeight = slot.length * scale;
+      doc.setFillColor(...(slot.blocked ? [246, 223, 143] : [231, 238, 233]));
+      doc.setDrawColor(...(slot.blocked ? [166, 82, 67] : [70, 92, 80]));
+      doc.roundedRect(slotX, slotY, slotWidth, slotHeight, 0.45, 0.45, "FD");
+      if (!slot.blocked) {
+        const loadColor = data.selectedLoad.shareKey === "drum" ? colors.amber : data.selectedLoad.shareKey === "kokille" ? [105, 168, 107] : [47, 111, 169];
+        doc.setFillColor(...loadColor);
+        doc.setDrawColor(...loadColor);
+        if (data.selectedLoad.shareKey === "drum") {
+          doc.circle(slotX + slotWidth / 2, slotY + slotHeight * 0.58, Math.min(slotWidth, slotHeight) * 0.14, "F");
+        } else {
+          doc.rect(slotX + slotWidth * 0.28, slotY + slotHeight * 0.34, slotWidth * 0.44, slotHeight * 0.42, "F");
+        }
+      }
+      setText(doc, Math.max(3.2, Math.min(4.4, slotWidth * 0.55)), [35, 52, 43], "bold");
+      doc.text(slot.blocked ? "Blokkert" : data.container.shortLabel, slotX + 0.6, slotY + 3.2);
+    });
+
+    doc.setGState(new doc.GState({ opacity: 0.86 }));
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(roomX + 1, roomY + 1, 20, 5.5, 0.8, 0.8, "F");
+    doc.roundedRect(roomX + roomWidth - 47, roomY + 1, 46, 5.5, 0.8, 0.8, "F");
+    doc.roundedRect(roomX + 1, roomY + 7, 59, 4.5, 0.8, 0.8, "F");
+    doc.setGState(new doc.GState({ opacity: 1 }));
+    setText(doc, 6.2, [28, 45, 35], "bold");
+    doc.text(room.label, roomX + 2, roomY + 6);
+    doc.text(`B ${room.width.toFixed(3)} x L ${room.displayLength.toFixed(3)} m`, roomX + roomWidth - 2, roomY + 6, { align: "right" });
+    setText(doc, 4.8, [72, 86, 77], "bold");
+    doc.text(`${room.grossSlots} brutto - ${room.blockedSlots.length} blokkert = ${room.floorSlots} gulvplasser`, roomX + 2, roomY + 11);
+
+    if (room.extension) {
+      const extensionY = toY(room.extension.y, room.extension.length);
+      setText(doc, 4.6, [115, 32, 101], "bold");
+      doc.text(`Rosa felt - ${room.useLager2Extension ? "inkludert" : "fratrukket"}`, toX(room.x + room.extension.width / 2), extensionY + 14, { align: "center" });
+    }
+    (room.obstructions || []).forEach((obstruction) => {
+      const obstructionY = toY(obstruction.y, obstruction.length);
+      const labelY = room.key === "lager1" ? roomY - 1.5 : obstructionY + 14;
+      setText(doc, 4.4, [72, 70, 13], "bold");
+      doc.text(`${obstruction.label} - ${room.includeMarkedAreas ? "inkludert" : "fratrukket"}`, toX(room.x + obstruction.x + obstruction.width / 2), labelY, { align: "center" });
+    });
+  });
+
+  setText(doc, 5, colors.muted, "bold");
+  doc.text("16 850 mm", toX(8.425), planY + drawingHeight + 4, { align: "center" });
+  doc.text("500", toX(17.1), planY + drawingHeight + 4, { align: "center" });
+  doc.text("16 850 mm", toX(25.775), planY + drawingHeight + 4, { align: "center" });
+  doc.text("Innvendig lagerbredde 34 200 mm", planX + drawingWidth / 2, planY + drawingHeight + 8, { align: "center" });
+
+  const legendY = planY + drawingHeight + 11;
+  const legend = [
+    ["Container", [231, 238, 233]],
+    ["Valgt last", data.selectedLoad.shareKey === "drum" ? colors.amber : data.selectedLoad.shareKey === "kokille" ? [105, 168, 107] : [47, 111, 169]],
+    ["Slusefelt", [246, 242, 183]],
+    ["Kjøregang", [222, 239, 248]],
+    ["Rosa felt", [245, 195, 234]]
+  ];
+  legend.forEach(([label, color], index) => {
+    const legendX = planX + index * (drawingWidth / legend.length);
+    doc.setFillColor(...color);
+    doc.setDrawColor(...colors.line);
+    doc.rect(legendX, legendY - 2.5, 3.5, 2.5, "FD");
+    setText(doc, 4.4, colors.muted, "bold");
+    doc.text(label, legendX + 4.5, legendY - 0.4);
+  });
 }
 
 function drawBarChart(doc, x, y, width, height, title, data, color = colors.teal, suffix = "") {
@@ -285,8 +399,8 @@ function addSummaryPage(doc, data, imageData) {
   const aisleSummary = settings.reserveAisle
     ? `kjøregang ${formatMeters(getAisleWidth(container, settings), 3)} (${formatMeters(container.width, 3)} + 2 x ${formatMeters(settings.aisleSideClearance, 2)})`
     : "kjøregang ikke reservert";
-  doc.text(doc.splitTextToSize(`Lagerforutsetning: ${formatMeters(settings.warehouseLength, 1)} x ${formatMeters(settings.warehouseWidth, 1)}, tak ${formatMeters(settings.roofHeight, 1)}, veggavstand ${formatMeters(settings.wallClearance, 2)}, containermellomrom ${formatMeters(settings.containerGap, 2)}, ${aisleSummary}.`, 273), 12, 175);
-  doc.text(`Ved valgt takhøyde: ${stackCount} containere i høyden${Number.isFinite(container.maxCertifiedStackHeight) ? `, begrenset til sertifisert maksimum ${container.maxCertifiedStackHeight}` : ""}.`, 12, 184);
+  doc.text(doc.splitTextToSize(`Lagerforutsetning: arkitektmodell B 34,200 x maks L 34,000 m, tak ${formatMeters(settings.roofHeight, 1)}, veggavstand ${formatMeters(settings.wallClearance, 2)}, avstand til sluser/dører ${formatMeters(settings.doorClearance, 2)}, containermellomrom ${formatMeters(settings.containerGap, 2)}, ${aisleSummary}.`, 273), 12, 175);
+  doc.text(`Ved valgt takhøyde: ${stackCount} containere i høyden${Number.isFinite(container.maxCertifiedStackHeight) ? `; registrert sertifisert maksimum er ${container.maxCertifiedStackHeight}` : ""}.`, 12, 184);
   setText(doc, 7, colors.muted);
   doc.text(doc.splitTextToSize("Rapporten er en dimensjons- og kapasitetsstudie. Faktisk stabling, gulvlast, brannkrav, truckadkomst, sikring, løfteredskap og operasjonelle toleranser må prosjekteres og verifiseres separat.", 273), 12, 190);
 }
@@ -345,63 +459,124 @@ function add3DExamplesPage(doc, data, selectedImage, previewImages) {
   doc.text(doc.splitTextToSize("Containeren vises transparent. Lasten er plassert med simulatorens valgte orientering, og hard-top-profilene vises i taksonen. Grønn status betyr at minst én registrert åpning kan brukes. Gul status betyr at lasten passer innvendig, men registrerte åpninger eller praktisk innføring må verifiseres.", 250), 12, 190);
 }
 
-function addWarehousePage(doc, data) {
+function addWarehouseScenarioPage(doc, data, scenario, index) {
   doc.addPage();
-  addPageTitle(doc, "Lagerplassering og avstandsfølsomhet", "Valgte parametere og grafisk kapasitetsstudie");
-  const layout = getWarehouseLayout(data.container, data.settings);
+  addPageTitle(doc, `Lagerkapittel ${index + 1}/3 - ${scenario.label}`, scenario.subtitle);
+  drawArchitecturalPlan(doc, 12, 34, 158, 158, data, scenario);
   const stackCount = getStackCount(data.container, data.settings.roofHeight, data.settings.topClearance);
-  drawWarehousePlan(doc, 14, 38, 145, 92, data.container, data.settings, layout);
+  drawMetricCard(doc, 178, 37, 50, "Gulvplasser", scenario.totalFloorSlots, `${scenario.totalGrossSlots} brutto - ${scenario.totalBlockedSlots} blokkert`);
+  drawMetricCard(doc, 233, 37, 50, "Effektivt areal", `${formatNumber(scenario.totalEffectiveArea, 0)} m2`, "etter felt og kjøregang");
+  drawMetricCard(doc, 178, 67, 50, "I høyden", stackCount, `tak ${formatMeters(data.settings.roofHeight, 1)}`);
+  drawMetricCard(doc, 233, 67, 50, "Total kapasitet", scenario.totalFloorSlots * stackCount, "gulvplasser x høyde");
 
-  drawMetricCard(doc, 170, 38, 54, "Containere på gulv", layout.count, `${layout.cols} x ${layout.rows}, ${layout.orientation}`);
-  drawMetricCard(doc, 229, 38, 54, "I høyden", stackCount, `tak ${formatMeters(data.settings.roofHeight, 1)}`);
-  drawMetricCard(doc, 170, 68, 54, "Totale plasser", layout.count * stackCount, "gulv x høyde");
-  drawMetricCard(doc, 229, 68, 54, "Reservert gang", data.settings.reserveAisle ? formatMeters(layout.aisleWidth, 3) : "Ingen", data.settings.reserveAisle ? `B container + 2 x ${formatMeters(data.settings.aisleSideClearance, 2)}` : "hele bredden disponibel");
-  drawMetricCard(doc, 170, 98, 54, "Fra vegg", formatMeters(data.settings.wallClearance, 2), "på alle sider");
-  drawMetricCard(doc, 229, 98, 54, "Mellomrom", formatMeters(data.settings.containerGap, 2), "mellom containere");
+  setText(doc, 10, colors.ink, "bold");
+  doc.text("Romfordeling", 178, 105);
+  scenario.roomModels.forEach((room, roomIndex) => {
+    const rowY = 111 + roomIndex * 20;
+    doc.setFillColor(...colors.paper);
+    doc.setDrawColor(...colors.line);
+    doc.roundedRect(178, rowY, 105, 16, 1.5, 1.5, "FD");
+    setText(doc, 8, colors.ink, "bold");
+    doc.text(room.label, 182, rowY + 6);
+    doc.text(`${room.floorSlots} gulvplasser`, 279, rowY + 6, { align: "right" });
+    setText(doc, 6.3, colors.muted);
+    doc.text(`${room.grossSlots} brutto - ${room.blockedSlots.length} blokkert - ${formatNumber(room.effectiveArea, 0)} m2`, 182, rowY + 12);
+  });
 
-  const wallData = wallClearanceSeries.map((clearance) => ({
-    label: `${formatNumber(clearance, 1)} m`,
-    value: getWarehouseLayout(data.container, { ...data.settings, wallClearance: clearance }).count
-  }));
-  const gapData = containerGapSeries.map((gap) => ({
-    label: `${formatNumber(gap, 2)} m`,
-    value: getWarehouseLayout(data.container, { ...data.settings, containerGap: gap }).count
-  }));
-  drawBarChart(doc, 14, 145, 126, 43, "Containere på gulv ved ulik veggavstand", wallData, colors.cyan);
-  drawBarChart(doc, 158, 145, 125, 43, "Containere på gulv ved ulik avstand mellom containere", gapData, colors.teal);
+  setText(doc, 8, colors.ink, "bold");
+  doc.text("Plasseringsforutsetninger", 178, 157);
+  setText(doc, 6.5, colors.muted);
+  const aisleText = data.settings.reserveAisle
+    ? `Sentrert kjøregang ${formatMeters(scenario.transportAisleWidth, 3)} i hvert lager.`
+    : "Ingen kjøregang reservert.";
+  doc.text(doc.splitTextToSize(`Orientering: ${scenario.containerPlacement.orientation === "rotated" ? "90 grader" : "standard"}. Veggklarering ${formatMeters(data.settings.wallClearance, 2)}, avstand til sluser/dører ${formatMeters(data.settings.doorClearance, 2)} og ${formatMeters(data.settings.containerGap, 2)} mellom containere. ${aisleText}`, 102), 178, 164);
+  setText(doc, 6.2, colors.muted);
+  doc.text(doc.splitTextToSize("Planen bruker samme rommål, slusegeometri, rosa felt, målsetting og slot-logikk som simulatorens arkitektbaserte plassmodell. Lastsymbolene viser valgt lasttype, ikke en bestilt mengde.", 102), 178, 184);
+}
+
+function addWarehouseComparisonPage(doc, data) {
+  doc.addPage();
+  addPageTitle(doc, "Lagerkapittel - sammenligning og følsomhet", "Kapasitet med og uten rosa felt/slusefelt, samt virkningen av klaringer");
+  const scenarios = data.warehouseAnalysis.scenarios;
+  scenarios.forEach((scenario, index) => {
+    const x = 14 + index * 91;
+    drawMetricCard(doc, x, 38, 85, scenario.label, `${scenario.totalFloorSlots} gulvplasser`, `${formatNumber(scenario.totalEffectiveArea, 0)} m2 - ${scenario.totalBlockedSlots} blokkert`);
+  });
+
+  drawBarChart(doc, 14, 78, 126, 48, "Gulvplasser ved ulik veggklarering", data.warehouseAnalysis.wallClearanceSeries, colors.cyan);
+  drawBarChart(doc, 158, 78, 125, 48, "Gulvplasser ved ulik containeravstand", data.warehouseAnalysis.containerGapSeries, colors.teal);
+
+  setText(doc, 10, colors.ink, "bold");
+  doc.text("Hva alternativene betyr", 14, 143);
+  const notes = [
+    ["Basisareal", "Lager 2 stopper ved 29,000 m. Rosa utvidelse og alle gule slusefelt er fratrukket."],
+    ["Rosa felt inkludert", "Lager 2 forlenges til 34,000 m. Forrom/sluse og personsluse er fortsatt fratrukket."],
+    ["Alle markerte felt", "Rosa felt og gule slusefelt behandles som tilgjengelig lagerareal. Operativ godkjenning kreves."]
+  ];
+  notes.forEach(([title, body], index) => {
+    const x = 14 + index * 91;
+    doc.setFillColor(...colors.paper);
+    doc.setDrawColor(...colors.line);
+    doc.roundedRect(x, 150, 85, 34, 2, 2, "FD");
+    setText(doc, 8, colors.ink, "bold");
+    doc.text(title, x + 4, 158);
+    setText(doc, 6.4, colors.muted);
+    doc.text(doc.splitTextToSize(body, 77), x + 4, 165);
+  });
 }
 
 function addStackingPage(doc, data) {
   doc.addPage();
-  addPageTitle(doc, "Stabling og takhøyde", "Geometrisk kapasitet, sertifisert maksimum og samlet lastkapasitet");
+  addPageTitle(doc, "Stabling av lastede containere", "Takhøyde, leverandørgrense, lastet bruttovekt og stacking-test screening");
   const stackData = roofHeightSeries.map((roofHeight) => ({
     label: `${roofHeight} m`,
     value: getStackCount(data.container, roofHeight, data.settings.topClearance)
   }));
-  drawBarChart(doc, 14, 39, 176, 68, "Antall containere i høyden ved ulik takhøyde", stackData, colors.teal);
+  drawBarChart(doc, 14, 39, 155, 55, "Antall containere i høyden ved ulik takhøyde", stackData, colors.teal);
 
   const selectedStackCount = getStackCount(data.container, data.settings.roofHeight, data.settings.topClearance);
-  drawMetricCard(doc, 201, 39, 82, "Valgt takhøyde", formatMeters(data.settings.roofHeight, 1), `toppklaring ${formatMeters(data.settings.topClearance, 2)}`);
-  drawMetricCard(doc, 201, 70, 82, "Containerstabel", `${selectedStackCount} høy`, Number.isFinite(data.container.maxCertifiedStackHeight) ? `sertifisert maksimum ${data.container.maxCertifiedStackHeight}` : "ingen sertifisert grense registrert");
+  drawMetricCard(doc, 178, 39, 50, "Valgt takhøyde", formatMeters(data.settings.roofHeight, 1), `toppklaring ${formatMeters(data.settings.topClearance, 2)}`);
+  drawMetricCard(doc, 233, 39, 50, "Geometrisk stabel", `${selectedStackCount} høy`, "før lastspesifikk screening");
+  drawMetricCard(doc, 178, 69, 50, "Max gross", Number.isFinite(data.container.maxGross) ? `${formatNumber(data.container.maxGross)} kg` : "Ikke oppgitt", "per container");
+  drawMetricCard(doc, 233, 69, 50, "Stacking test load", Number.isFinite(getStackingTestLoad(data.container)) ? `${formatNumber(getStackingTestLoad(data.container))} kg` : "Ikke oppgitt", "leverandørens testverdi");
 
-  setText(doc, 11, colors.ink, "bold");
-  doc.text("Leverandørdata for stabling og vekt", 14, 123);
-  const specs = [
-    ["Max gross weight", Number.isFinite(data.container.maxGross) ? `${formatNumber(data.container.maxGross)} kg` : "Ikke oppgitt"],
-    ["Tare weight", Number.isFinite(data.container.tare) ? `${formatNumber(data.container.tare)} kg` : "Ikke oppgitt"],
-    ["Max payload", Number.isFinite(data.container.payload) ? `${formatNumber(data.container.payload)} kg` : "Ikke oppgitt"],
-    ["Stacking test load", Number.isFinite(data.container.stackingTestLoadPerPost) ? `${formatNumber(data.container.stackingTestLoadPerPost)} kg/post` : "Ikke oppgitt"],
-    ["Sertifisert stabling", Number.isFinite(data.container.maxCertifiedStackHeight) ? `${data.container.maxCertifiedStackHeight} høy` : "Ikke oppgitt"],
-    ["Innvendig volum", Number.isFinite(data.container.insideCubicCapacity) ? `${formatNumber(data.container.insideCubicCapacity, 2)} m3` : "Ikke oppgitt"]
+  const columns = [
+    ["Last", 14],
+    ["Stk/cont.", 73],
+    ["Payload", 101],
+    ["Bruttovekt", 133],
+    ["Tak", 170],
+    ["Test-screen", 195],
+    ["Resultat", 232]
   ];
-  specs.forEach(([label, value], index) => {
-    const col = index % 3;
-    const row = Math.floor(index / 3);
-    drawMetricCard(doc, 14 + col * 91, 130 + row * 30, 85, label, value);
+  doc.setFillColor(...colors.dark);
+  doc.roundedRect(12, 104, 273, 11, 1.5, 1.5, "F");
+  columns.forEach(([label, x]) => {
+    setText(doc, 6.6, colors.white, "bold");
+    doc.text(label, x + 2, 111);
   });
 
-  setText(doc, 7, colors.muted);
-  doc.text(doc.splitTextToSize("Stacking test load er en typeprøvingsverdi per hjørnestolpe og brukes ikke som en direkte gulv- eller nyttelastgrense. Rapporten begrenser derfor stabelen til leverandørens oppgitte 9-høy kontroll og valgt takhøyde. Endelig stabling krever kontroll av underlag, lastfordeling, hjørnebeslag og myndighetskrav.", 269), 14, 193);
+  data.loadRows.forEach((row, index) => {
+    const y = 117 + index * 11.5;
+    const stack = getLoadedStackScreening(data.container, row, data.settings);
+    doc.setFillColor(...(index % 2 === 0 ? [247, 250, 249] : [239, 245, 243]));
+    doc.setDrawColor(...colors.line);
+    doc.rect(12, y, 273, 10, "FD");
+    setText(doc, 6.5, colors.ink, "bold");
+    doc.text(row.load.shortLabel || row.load.label, 16, y + 6.5);
+    doc.text(`${row.practicalCount}`, 76, y + 6.5);
+    doc.text(`${formatNumber(row.loadedPayloadWeight)} kg`, 103, y + 6.5);
+    doc.text(`${formatNumber(stack.loadedGrossWeight)} kg`, 135, y + 6.5);
+    doc.text(`${stack.roofLimit} høy`, 172, y + 6.5);
+    doc.text(Number.isFinite(stack.testLoadLimit) ? `${stack.testLoadLimit} høy` : "-", 198, y + 6.5);
+    doc.setTextColor(...(stack.screenedStackHeight > 0 ? colors.green : colors.red));
+    doc.text(`${stack.screenedStackHeight} høy`, 234, y + 6.5);
+    setText(doc, 5.5, colors.muted);
+    doc.text(stack.governing, 252, y + 6.5);
+  });
+
+  setText(doc, 6.2, colors.muted);
+  doc.text(doc.splitTextToSize("Test-screening er en konservativ sammenligning der stacking-testlasten behandles som samlet last over nederste container: 1 + gulv(testlast / lastet bruttovekt), deretter begrenset av takhøyde og registrert sertifisert maksimum. Dette er ikke en godkjenning av operativ stabling. Underlag, hjørnebeslag, lastfordeling, seismikk, brann og leverandørens stablingsinstruks må verifiseres.", 270), 14, 190);
 }
 
 function addLoadMatrixPage(doc, data) {
@@ -459,6 +634,110 @@ function addLoadMatrixPage(doc, data) {
   doc.text("Tolkning", 14, 193);
   setText(doc, 6.5, colors.muted);
   doc.text("Praktisk antall = laveste verdi av geometrisk kapasitet og nyttelastgrense. Antall lag er en ren geometrisk kontroll; faktisk stabling av kolli krever verifisert bæreevne og sikring.", 45, 193);
+}
+
+function addLoadWeightAnalysisPage(doc, data) {
+  doc.addPage();
+  addPageTitle(doc, "Last- og vektanalyse per container", "Geometrisk kapasitet, nyttelast, lastet bruttovekt og tilgjengelig vektmargin");
+  drawMetricCard(doc, 14, 37, 62, "Tare weight", Number.isFinite(data.container.tare) ? `${formatNumber(data.container.tare)} kg` : "Ikke oppgitt", "tom container");
+  drawMetricCard(doc, 82, 37, 62, "Max payload", Number.isFinite(data.container.payload) ? `${formatNumber(data.container.payload)} kg` : "Ikke oppgitt", "last i container");
+  drawMetricCard(doc, 150, 37, 62, "Max gross", Number.isFinite(data.container.maxGross) ? `${formatNumber(data.container.maxGross)} kg` : "Ikke oppgitt", "tare + payload");
+  drawMetricCard(doc, 218, 37, 65, "Stacking test load", Number.isFinite(getStackingTestLoad(data.container)) ? `${formatNumber(getStackingTestLoad(data.container))} kg` : "Ikke oppgitt", "testverdi, ikke payload");
+
+  const columns = [
+    ["Last", 14],
+    ["Geometri", 70],
+    ["Praktisk", 99],
+    ["kg/stk", 128],
+    ["Payload brukt", 156],
+    ["Bruttovekt", 194],
+    ["Utnyttelse", 229],
+    ["Maks kg/stk*", 258]
+  ];
+  doc.setFillColor(...colors.dark);
+  doc.roundedRect(12, 72, 273, 12, 1.5, 1.5, "F");
+  columns.forEach(([label, x]) => {
+    setText(doc, 6.2, colors.white, "bold");
+    doc.text(label, x + 1, 80);
+  });
+
+  data.loadRows.forEach((row, index) => {
+    const y = 86 + index * 16;
+    doc.setFillColor(...(index % 2 === 0 ? [247, 250, 249] : [239, 245, 243]));
+    doc.setDrawColor(...colors.line);
+    doc.rect(12, y, 273, 14, "FD");
+    setText(doc, 7, colors.ink, "bold");
+    doc.text(row.load.label, 15, y + 6);
+    setText(doc, 5.8, colors.muted);
+    doc.text(row.load.dimensions, 15, y + 11);
+    const values = [
+      [`${row.geometricCount}`, 72],
+      [`${row.practicalCount}`, 101],
+      [`${formatNumber(row.load.defaultWeight)}`, 130],
+      [`${formatNumber(row.loadedPayloadWeight)} kg`, 158],
+      [`${formatNumber(row.loadedGrossWeight)} kg`, 196],
+      [Number.isFinite(row.payloadUtilization) ? `${formatNumber(row.payloadUtilization, 0)} %` : "-", 231],
+      [Number.isFinite(row.maxUnitWeightAtGeometricCount) ? `${formatNumber(row.maxUnitWeightAtGeometricCount)} kg` : "-", 260]
+    ];
+    values.forEach(([value, x]) => {
+      setText(doc, 6.8, colors.ink, "bold");
+      doc.text(value, x, y + 8);
+    });
+  });
+
+  setText(doc, 6.3, colors.muted);
+  doc.text(doc.splitTextToSize("* Maks kg/stk er containerens registrerte payload delt på geometrisk antall. Praktisk antall er laveste verdi av geometrisk kapasitet og payloadgrense. Tabellen bruker simulatorens standardvekter; faktisk lastvekt, punktlast, tyngdepunkt og gulvkapasitet skal dokumenteres separat.", 270), 14, 188);
+}
+
+function addDrumWeightAnalysisPage(doc, data) {
+  const drumRow = data.loadRows.find((row) => row.key === "drum210");
+  if (!drumRow) return;
+  doc.addPage();
+  addPageTitle(doc, "210L tønner - antall og vekt", "Hvor mange tønner som kan lastes ved ulike vekter per tønne");
+  const weights = [200, 250, 300, 330, 400, 500, 600, 720, 800, 1000];
+  const rows = weights.map((unitWeight) => {
+    const payloadLimit = Number.isFinite(data.container.payload) ? Math.floor(data.container.payload / unitWeight) : drumRow.geometricCount;
+    const count = Math.max(0, Math.min(drumRow.geometricCount, payloadLimit));
+    const payloadWeight = count * unitWeight;
+    return {
+      label: `${unitWeight} kg`,
+      value: count,
+      unitWeight,
+      payloadLimit,
+      count,
+      payloadWeight,
+      grossWeight: (data.container.tare || 0) + payloadWeight,
+      utilization: Number.isFinite(data.container.payload) && data.container.payload > 0 ? payloadWeight / data.container.payload * 100 : null
+    };
+  });
+  drawBarChart(doc, 14, 39, 166, 58, "Antall tønner ved ulik vekt per tønne", rows, colors.amber);
+  drawMetricCard(doc, 190, 39, 43, "Geometrisk", drumRow.geometricCount, `${drumRow.result.count}/lag x ${drumRow.verticalLayers} lag`);
+  drawMetricCard(doc, 238, 39, 45, "Ved 330 kg", drumRow.practicalCount, `${formatNumber(drumRow.loadedPayloadWeight)} kg payload`);
+  drawMetricCard(doc, 190, 69, 43, "Maks snittvekt", Number.isFinite(drumRow.maxUnitWeightAtGeometricCount) ? `${formatNumber(drumRow.maxUnitWeightAtGeometricCount)} kg` : "-", "for fullt geometrisk antall");
+  drawMetricCard(doc, 238, 69, 45, "Bruttovekt", `${formatNumber(drumRow.loadedGrossWeight)} kg`, "ved standardvekt 330 kg");
+
+  const columns = [["kg/tønne", 15], ["Geometrisk", 57], ["Payloadgrense", 98], ["Praktisk antall", 145], ["Payload brukt", 190], ["Bruttovekt", 231], ["Utnyttelse", 263]];
+  doc.setFillColor(...colors.dark);
+  doc.roundedRect(12, 108, 273, 10, 1.5, 1.5, "F");
+  columns.forEach(([label, x]) => {
+    setText(doc, 6.1, colors.white, "bold");
+    doc.text(label, x, 115);
+  });
+  rows.forEach((row, index) => {
+    const y = 120 + index * 6.2;
+    doc.setFillColor(...(row.unitWeight === 330 ? [255, 245, 220] : index % 2 === 0 ? [247, 250, 249] : [239, 245, 243]));
+    doc.setDrawColor(...colors.line);
+    doc.rect(12, y, 273, 5.5, "FD");
+    const values = [row.unitWeight, drumRow.geometricCount, row.payloadLimit, row.count, `${formatNumber(row.payloadWeight)} kg`, `${formatNumber(row.grossWeight)} kg`, Number.isFinite(row.utilization) ? `${formatNumber(row.utilization, 0)} %` : "-"];
+    const positions = [16, 60, 101, 149, 192, 233, 266];
+    values.forEach((value, valueIndex) => {
+      setText(doc, 5.8, colors.ink, row.unitWeight === 330 ? "bold" : "normal");
+      doc.text(String(value), positions[valueIndex], y + 3.8);
+    });
+  });
+
+  setText(doc, 6.2, colors.muted);
+  doc.text(doc.splitTextToSize("Analysen forutsetter stående 210L tønner, simulatorens kolliavstand og jevn lastfordeling. Den kontrollerer antall og totalvekt, men ikke tønnenes stablingsstyrke, pall, festemidler, lokalt gulvtrykk eller håndteringsutstyr.", 270), 14, 190);
 }
 
 function addLoadVisualsPage(doc, data) {
@@ -522,8 +801,8 @@ function addMethodPage(doc, data) {
     ["Last i høyden", "Antall lag beregnes geometrisk fra innvendig høyde og valgt kolliavstand. Rapporten bekrefter ikke at tønner, stålkasser eller kokiller tåler å stå oppå hverandre."],
     ["Vektkapasitet", "Praktisk antall begrenses av registrert payload og standardvekten for lasttypen. Punktlaster, tyngdepunkt og gulvkapasitet må kontrolleres separat."],
     ["Innlasting", "Toppåpning kontrolleres mot kolliets lengde og bredde. Frontåpning kontrolleres mot bredde og høyde. Løfteredskap, toleranser, innføringsvinkel og håndteringsmargin inngår ikke automatisk."],
-    ["Containerstabling", "Antall i høyden styres av takhøyde minus toppklaring og begrenses til sertifisert maksimum når dette er oppgitt. Stacking test load brukes som dokumentasjonsdata, ikke som direkte lastformel."],
-    ["Lagerplassering", "Lagerkapasiteten reserverer veggavstand og mellomrom mellom containere. Kjøregang er valgfri; når den brukes beregnes den som utvendig containerbredde pluss valgt slingringsmonn på begge sider. Søyler, brannskiller, rømningsveier, porter, truckvending og lokale hindringer må legges inn i detaljprosjektering."]
+    ["Containerstabling", "Antall i høyden styres av takhøyde, sertifisert maksimum og en tydelig merket screening av lastet bruttovekt mot stacking-testlast. Screeningen er ikke en operativ godkjenning."],
+    ["Lagerplassering", "Tre arkitektalternativer viser rosa felt og slusefelt inkludert eller fratrukket. Veggavstand, dørklarering, containeravstand og valgfri kjøregang inngår i slot-beregningen. Brannskiller, porter og truckvending må detaljprosjekteres."]
   ];
   sections.forEach(([title, body], index) => {
     const col = index % 2;
@@ -573,15 +852,19 @@ export async function generateContainerStudyPdf(input) {
 
   addSummaryPage(doc, data, imageData);
   add3DExamplesPage(doc, data, imageData, previewImages);
-  addWarehousePage(doc, data);
+  (data.warehouseAnalysis?.scenarios || []).forEach((scenario, index) => addWarehouseScenarioPage(doc, data, scenario, index));
+  if (data.warehouseAnalysis?.scenarios?.length) addWarehouseComparisonPage(doc, data);
   addStackingPage(doc, data);
   addLoadMatrixPage(doc, data);
+  addLoadWeightAnalysisPage(doc, data);
+  addDrumWeightAnalysisPage(doc, data);
   addLoadVisualsPage(doc, data);
   addMethodPage(doc, data);
   addFooters(doc, input.container.specification || "Simulatorberegning");
 
   const date = new Date().toISOString().slice(0, 10);
   const fileName = `containerstudie-${safeFileName(input.container.shortLabel || input.container.label)}-${date}.pdf`;
+  const downloadUrl = URL.createObjectURL(doc.output("blob"));
   doc.save(fileName);
-  return { fileName, pages: doc.getNumberOfPages() };
+  return { fileName, pages: doc.getNumberOfPages(), downloadUrl };
 }

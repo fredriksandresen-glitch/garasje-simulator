@@ -146,6 +146,7 @@ const containerTypes = {
     tare: 1520,
     maxGross: 10160,
     payload: 8640,
+    stackingTestLoad: 36576,
     stackingTestLoadPerPost: 36576,
     maxCertifiedStackHeight: 9,
     insideCubicCapacity: 8.13,
@@ -352,6 +353,107 @@ function buildRoomSlotGrid({ room, storageLength, containerPlacement, wallCleara
   }, 0);
 
   return { slots, cols, rows, clearWidth, clearLength, effectiveArea, transportAisle };
+}
+
+const reportWarehouseScenarioDefinitions = [
+  {
+    key: "basis",
+    label: "Basisareal",
+    subtitle: "Rosa felt og slusefelt er fratrukket lagerkapasiteten",
+    includeMarkedAreas: false,
+    useLager2Extension: false
+  },
+  {
+    key: "pink",
+    label: "Rosa felt inkludert",
+    subtitle: "Rosa felt er lagerareal, mens forrom og personsluse er fratrukket",
+    includeMarkedAreas: false,
+    useLager2Extension: true
+  },
+  {
+    key: "all",
+    label: "Alle markerte felt inkludert",
+    subtitle: "Rosa felt, forrom/sluse og personsluse inngår i beregnet lagerareal",
+    includeMarkedAreas: true,
+    useLager2Extension: true
+  }
+];
+
+function buildReportWarehouseScenario(container, settings, definition) {
+  const transportAisleWidth = settings.reserveAisle
+    ? container.width + settings.aisleSideClearance * 2
+    : 0;
+  const placements = [
+    { orientation: "standard", length: container.length, width: container.width },
+    { orientation: "rotated", length: container.width, width: container.length }
+  ];
+  const candidates = placements.map((containerPlacement) => {
+    const roomModels = rooms.map((room) => {
+      const storageLength = room.key === "lager2" && definition.useLager2Extension ? room.extendedLength : room.usableLength;
+      const displayLength = room.key === "lager1" ? room.baseLength : room.extendedLength;
+      const grid = buildRoomSlotGrid({
+        room,
+        storageLength,
+        containerPlacement,
+        wallClearance: settings.wallClearance,
+        doorClearance: settings.doorClearance,
+        aisleGap: settings.containerGap,
+        includeMarkedAreas: definition.includeMarkedAreas,
+        transportAisleWidth
+      });
+      const blockedSlots = grid.slots.filter((slot) => slot.blocked);
+      const floorSlots = grid.slots.length - blockedSlots.length;
+      return {
+        ...room,
+        storageLength,
+        displayLength,
+        geometricSlots: grid.slots,
+        grossSlots: grid.slots.length,
+        blockedSlots,
+        floorSlots,
+        transportAisle: grid.transportAisle,
+        effectiveArea: grid.effectiveArea,
+        includeMarkedAreas: definition.includeMarkedAreas,
+        useLager2Extension: definition.useLager2Extension
+      };
+    });
+    return {
+      containerPlacement,
+      roomModels,
+      totalFloorSlots: roomModels.reduce((sum, room) => sum + room.floorSlots, 0),
+      totalGrossSlots: roomModels.reduce((sum, room) => sum + room.grossSlots, 0),
+      totalBlockedSlots: roomModels.reduce((sum, room) => sum + room.blockedSlots.length, 0),
+      totalEffectiveArea: roomModels.reduce((sum, room) => sum + room.effectiveArea, 0)
+    };
+  });
+  const selected = candidates.reduce((best, candidate) => (
+    !best || candidate.totalFloorSlots > best.totalFloorSlots ? candidate : best
+  ), null);
+  return {
+    ...definition,
+    ...selected,
+    transportAisleWidth,
+    planWidth: 16.85 * 2 + separatorWidth,
+    planLength: 34
+  };
+}
+
+function buildArchitecturalWarehouseReport(container, settings) {
+  const scenarios = reportWarehouseScenarioDefinitions.map((definition) => buildReportWarehouseScenario(container, settings, definition));
+  const referenceDefinition = reportWarehouseScenarioDefinitions[1];
+  return {
+    planWidth: 16.85 * 2 + separatorWidth,
+    planLength: 34,
+    scenarios,
+    wallClearanceSeries: [0.2, 0.5, 1, 1.5].map((clearance) => ({
+      label: `${clearance.toFixed(1)} m`,
+      value: buildReportWarehouseScenario(container, { ...settings, wallClearance: clearance }, referenceDefinition).totalFloorSlots
+    })),
+    containerGapSeries: [0.1, 0.25, 0.5, 1].map((gap) => ({
+      label: `${gap.toFixed(2)} m`,
+      value: buildReportWarehouseScenario(container, { ...settings, containerGap: gap }, referenceDefinition).totalFloorSlots
+    }))
+  };
 }
 
 function App() {
@@ -815,6 +917,7 @@ const containerReportDefaults = {
   roofHeight: 6,
   wallClearance: 0.5,
   containerGap: 0.25,
+  doorClearance: 0.9,
   reserveAisle: false,
   aisleSideClearance: 0.5,
   topClearance: 0.2
@@ -992,6 +1095,7 @@ function buildContainerReportLoadRows(container, spacing) {
       ? Math.max(0, Math.floor(container.payload / load.defaultWeight))
       : null;
     const practicalCount = weightLimitCount === null ? geometricCount : Math.min(geometricCount, weightLimitCount);
+    const loadedPayloadWeight = practicalCount * load.defaultWeight;
     const status = !result.compatible
       ? "fail"
       : result.accessBlocked
@@ -1015,7 +1119,11 @@ function buildContainerReportLoadRows(container, spacing) {
       geometricCount,
       weightLimitCount,
       practicalCount,
-      loadedWeight: practicalCount * load.defaultWeight,
+      loadedWeight: loadedPayloadWeight,
+      loadedPayloadWeight,
+      loadedGrossWeight: (container.tare || 0) + loadedPayloadWeight,
+      payloadUtilization: Number.isFinite(container.payload) && container.payload > 0 ? (loadedPayloadWeight / container.payload) * 100 : null,
+      maxUnitWeightAtGeometricCount: Number.isFinite(container.payload) && geometricCount > 0 ? container.payload / geometricCount : null,
       status,
       statusLabel
     };
@@ -1041,7 +1149,7 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
   const [studyOrientation, setStudyOrientation] = usePersistentState("studyOrientation", "auto");
   const [studySpacing, setStudySpacing] = usePersistentState("studySpacing", 0.05);
   const [reportSettings, setReportSettings] = usePersistentState("containerReportSettings", containerReportDefaults);
-  const [reportState, setReportState] = useState({ generating: false, message: "", error: false });
+  const [reportState, setReportState] = useState({ generating: false, message: "", error: false, downloadUrl: null, fileName: "" });
   const studyVisualRef = useRef(null);
   const reportPreviewRefs = useRef({});
   const customContainer = useMemo(() => buildCustomStudyContainer(customStudyContainer), [customStudyContainer]);
@@ -1066,11 +1174,12 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
   const updateReportSetting = (field, value) => setReportSettings((current) => ({ ...containerReportDefaults, ...current, [field]: Number(value) }));
   const updateReportToggle = (field, value) => setReportSettings((current) => ({ ...containerReportDefaults, ...current, [field]: value }));
   const generateReport = async () => {
-    setReportState({ generating: true, message: "Bygger PDF-rapport …", error: false });
+    setReportState((current) => ({ ...current, generating: true, message: "Bygger PDF-rapport …", error: false }));
     try {
       const previewElements = reportPreviewRows.map((row) => reportPreviewRefs.current[row.key]).filter(Boolean);
       await waitForReportCanvases([studyVisualRef.current, ...previewElements].filter(Boolean));
       const { generateContainerStudyPdf } = await import("./containerStudyReport.js");
+      const effectiveReportSettings = { ...containerReportDefaults, ...reportSettings };
       const report = await generateContainerStudyPdf({
         container,
         containerKey: studyContainerKey,
@@ -1078,7 +1187,8 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
         selectedResult: result,
         loadRows: reportLoadRows,
         spacing: studySpacing,
-        settings: { ...containerReportDefaults, ...reportSettings },
+        settings: effectiveReportSettings,
+        warehouseAnalysis: buildArchitecturalWarehouseReport(container, effectiveReportSettings),
         visualElement: studyVisualRef.current,
         previewElements: reportPreviewRows.map((row) => ({
           key: row.key,
@@ -1089,10 +1199,11 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
           element: reportPreviewRefs.current[row.key]
         }))
       });
-      setReportState({ generating: false, message: `${report.fileName} er lastet ned (${report.pages} sider).`, error: false });
+      if (reportState.downloadUrl) URL.revokeObjectURL(reportState.downloadUrl);
+      setReportState({ generating: false, message: `${report.fileName} er lastet ned (${report.pages} sider).`, error: false, downloadUrl: report.downloadUrl, fileName: report.fileName });
     } catch (error) {
       console.error(error);
-      setReportState({ generating: false, message: "PDF-rapporten kunne ikke genereres. Prøv igjen etter at 3D-visningen er ferdig lastet.", error: true });
+      setReportState((current) => ({ ...current, generating: false, message: "PDF-rapporten kunne ikke genereres. Prøv igjen etter at 3D-visningen er ferdig lastet.", error: true }));
     }
   };
 
@@ -1152,23 +1263,26 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
 
       <section className="study-report-panel" aria-label="PDF-rapport for containerstudie">
         <div className="study-report-heading">
-          <div><p className="eyebrow">Dokumentasjon</p><h3>PDF-rapport for valgt container</h3><p>Rapporten inkluderer 3D-bilde, lagerplan, kapasitetsgrafer, stabling, alle lasttyper og klaringer mot topp- og frontåpning.</p></div>
-          <button type="button" className="study-report-button" onClick={generateReport} disabled={reportState.generating}>
-            <FileDown size={19} />{reportState.generating ? "Bygger rapport …" : "Generer PDF-rapport"}
-          </button>
+          <div><p className="eyebrow">Dokumentasjon</p><h3>PDF-rapport for valgt container</h3><p>Detaljert rapport med samme arkitektmodell som appen, tre lageralternativer, 3D-bilder, last-/vektanalyser, stabling og klaringer.</p></div>
+          <div className="study-report-actions">
+            <button type="button" className="study-report-button" onClick={generateReport} disabled={reportState.generating}>
+              <FileDown size={19} />{reportState.generating ? "Bygger rapport …" : "Generer PDF-rapport"}
+            </button>
+            {reportState.downloadUrl && <a className="study-report-redownload" href={reportState.downloadUrl} download={reportState.fileName}>Last ned siste rapport på nytt</a>}
+          </div>
         </div>
         <div className="study-report-settings">
-          <ReportSetting label="Lagerlengde" value={reportSettings.warehouseLength ?? containerReportDefaults.warehouseLength} min="1" step="0.1" suffix="m" onChange={(value) => updateReportSetting("warehouseLength", value)} />
-          <ReportSetting label="Lagerbredde" value={reportSettings.warehouseWidth ?? containerReportDefaults.warehouseWidth} min="1" step="0.1" suffix="m" onChange={(value) => updateReportSetting("warehouseWidth", value)} />
+          <div className="study-report-calculation active"><span>Arkitektmodell</span><strong>34.200 × 34.000 m</strong><small>Lager 1, Lager 2, forrom/sluse, personsluse og rosa felt</small></div>
           <ReportSetting label="Takhøyde" value={reportSettings.roofHeight ?? containerReportDefaults.roofHeight} min="1" step="0.1" suffix="m" onChange={(value) => updateReportSetting("roofHeight", value)} />
           <ReportSetting label="Fra vegg" value={reportSettings.wallClearance ?? containerReportDefaults.wallClearance} min="0" step="0.05" suffix="m" onChange={(value) => updateReportSetting("wallClearance", value)} />
           <ReportSetting label="Mellom containere" value={reportSettings.containerGap ?? containerReportDefaults.containerGap} min="0" step="0.05" suffix="m" onChange={(value) => updateReportSetting("containerGap", value)} />
+          <ReportSetting label="Avstand til sluser/dører" value={reportSettings.doorClearance ?? containerReportDefaults.doorClearance} min="0" step="0.05" suffix="m" onChange={(value) => updateReportSetting("doorClearance", value)} />
           <label className={`study-report-toggle ${reserveAisle ? "active" : ""}`}><input type="checkbox" checked={reserveAisle} onChange={(event) => updateReportToggle("reserveAisle", event.target.checked)} /><span>Reserver kjøregang</span><small>For rett transport av container</small></label>
           {reserveAisle && <ReportSetting label="Slingringsmonn per side" value={aisleSideClearance} min="0" step="0.05" suffix="m" onChange={(value) => updateReportSetting("aisleSideClearance", value)} />}
           <div className={`study-report-calculation ${reserveAisle ? "active" : ""}`}><span>Beregnet kjøregang</span><strong>{reserveAisle ? `${calculatedAisleWidth.toFixed(3)} m` : "Ikke reservert"}</strong><small>{reserveAisle ? `${container.width.toFixed(3)} m containerbredde + 2 × ${aisleSideClearance.toFixed(2)} m` : "Hele lagerbredden brukes til plassering"}</small></div>
           <ReportSetting label="Klaring mot tak" value={reportSettings.topClearance ?? containerReportDefaults.topClearance} min="0" step="0.05" suffix="m" onChange={(value) => updateReportSetting("topClearance", value)} />
         </div>
-        <p className={`study-report-message ${reportState.error ? "error" : ""}`} aria-live="polite">{reportState.message || "Kjøregang er valgfri. Når den reserveres, brukes containerens utvendige bredde + slingringsmonn på begge sider. Stabling og laststabling må fortsatt driftsverifiseres."}</p>
+        <p className={`study-report-message ${reportState.error ? "error" : ""}`} aria-live="polite">{reportState.message || "Lagerkapittelet viser basisareal, rosa felt inkludert og alle markerte felt inkludert. Kjøregang er valgfri og trekkes fra kapasiteten."}</p>
       </section>
 
       <div className="study-results">

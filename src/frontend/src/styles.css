@@ -226,6 +226,8 @@ input[type="range"] { width: 100%; accent-color: #286b52; }
 .study-report-button { flex: 0 0 auto; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 15px; border: 1px solid #58d8b7; border-radius: 7px; color: #092019; background: #58d8b7; cursor: pointer; font: inherit; font-weight: 900; box-shadow: 0 8px 20px rgba(50,171,143,.16); }
 .study-report-button:hover { background: #72e5c7; }
 .study-report-button:disabled { border-color: #405158; color: #84969a; background: #27363b; cursor: wait; box-shadow: none; }
+.study-report-actions { display: grid; justify-items: end; gap: 6px; }
+.study-report-redownload { color: #8fd7c5; font-size: .72rem; font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
 .study-report-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 8px; }
 .study-report-settings label { min-width: 0; display: grid; gap: 5px; padding: 9px; border: 1px solid #30454c; border-radius: 7px; background: rgba(8,18,22,.58); }
 .study-report-settings label > span { color: #8fa5a8; font-size: .68rem; font-weight: 850; text-transform: uppercase; }
