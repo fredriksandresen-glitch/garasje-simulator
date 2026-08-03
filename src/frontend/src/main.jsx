@@ -1017,7 +1017,9 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
     const candidates = reportLoadRows.filter((row) => row.key !== studyLoadKey);
     const passRow = candidates.find((row) => row.status === "pass");
     const issueRow = candidates.find((row) => row.status !== "pass");
-    return [passRow, issueRow].filter((row, index, rows) => row && rows.findIndex((item) => item.key === row.key) === index);
+    return [passRow, issueRow]
+      .filter(Boolean)
+      .filter((row, index, rows) => rows.findIndex((item) => item.key === row.key) === index);
   }, [reportLoadRows, studyLoadKey]);
   const isTight = result.compatible && result.criticalClearance < 0.05;
   const isOpeningTight = [result.frontAccess, result.topAccess].some((access) => access.compatible && access.criticalClearance < 0.05);
