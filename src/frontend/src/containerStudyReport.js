@@ -328,6 +328,44 @@ function drawBarChart(doc, x, y, width, height, title, data, color = colors.teal
   });
 }
 
+function drawGroupedBarChart(doc, x, y, width, height, title, data, series) {
+  setText(doc, 9, colors.ink, "bold");
+  doc.text(title, x, y);
+  const legendY = y + 5;
+  series.forEach((item, index) => {
+    const legendX = x + index * 47;
+    doc.setFillColor(...item.color);
+    doc.rect(legendX, legendY, 4, 2.5, "F");
+    setText(doc, 5.8, colors.muted, "bold");
+    doc.text(item.label, legendX + 6, legendY + 2.3);
+  });
+
+  const chartY = y + 12;
+  const chartH = height - 19;
+  const maxValue = Math.max(1, ...data.flatMap((item) => series.map((entry) => item[entry.key] || 0)));
+  const groupGap = 5;
+  const groupWidth = (width - groupGap * (data.length - 1)) / data.length;
+  const innerGap = 1.5;
+  const barWidth = Math.max(4, (groupWidth - innerGap * (series.length - 1)) / series.length);
+  doc.setDrawColor(...colors.line);
+  doc.line(x, chartY + chartH, x + width, chartY + chartH);
+
+  data.forEach((item, dataIndex) => {
+    const groupX = x + dataIndex * (groupWidth + groupGap);
+    series.forEach((entry, seriesIndex) => {
+      const value = item[entry.key] || 0;
+      const barHeight = (value / maxValue) * (chartH - 10);
+      const barX = groupX + seriesIndex * (barWidth + innerGap);
+      doc.setFillColor(...entry.color);
+      doc.roundedRect(barX, chartY + chartH - barHeight, barWidth, barHeight, 0.8, 0.8, "F");
+      setText(doc, 6.2, colors.ink, "bold");
+      doc.text(String(value), barX + barWidth / 2, chartY + chartH - barHeight - 1.5, { align: "center" });
+    });
+    setText(doc, 6.2, colors.muted);
+    doc.text(String(item.label), groupX + groupWidth / 2, chartY + chartH + 4, { align: "center" });
+  });
+}
+
 function drawOpeningDiagram(doc, x, y, width, height, openingWidth, openingHeight, itemWidth, itemHeight, status) {
   const availableW = Math.max(openingWidth || itemWidth, itemWidth, 0.1);
   const availableH = Math.max(openingHeight || itemHeight, itemHeight, 0.1);
@@ -405,12 +443,11 @@ function addSummaryPage(doc, data, imageData) {
   doc.text(doc.splitTextToSize("Rapporten er en dimensjons- og kapasitetsstudie. Faktisk stabling, gulvlast, brannkrav, truckadkomst, sikring, løfteredskap og operasjonelle toleranser må prosjekteres og verifiseres separat.", 273), 12, 190);
 }
 
-function add3DExamplesPage(doc, data, selectedImage, previewImages) {
-  doc.addPage();
-  addPageTitle(doc, "3D-eksempler fra containerstudien", "Valgt last og representative eksempler som passer eller krever verifisering");
+function addAll3DExamplesPages(doc, data, selectedImage, previewImages) {
   const selectedStatus = !data.selectedResult.compatible ? "fail" : data.selectedResult.accessBlocked ? "warn" : "pass";
   const examples = [
     {
+      key: "selected",
       label: data.selectedLoad.label,
       status: selectedStatus,
       statusLabel: selectedStatus === "pass" ? "Passer" : selectedStatus === "warn" ? "Innlasting må verifiseres" : "Passer ikke",
@@ -419,44 +456,54 @@ function add3DExamplesPage(doc, data, selectedImage, previewImages) {
       selected: true
     },
     ...previewImages
-  ].slice(0, 3);
+  ].filter((example, index, rows) => rows.findIndex((candidate) => candidate.label === example.label) === index);
+  const pageCount = Math.ceil(examples.length / 3);
 
-  examples.forEach((example, index) => {
-    const x = 12 + index * 92;
-    const y = 37;
-    doc.setFillColor(...colors.paper);
-    doc.setDrawColor(...colors.line);
-    doc.roundedRect(x, y, 88, 135, 2.5, 2.5, "FD");
-    doc.setFillColor(...getStatusColor(example.status));
-    doc.roundedRect(x + 5, y + 5, 30, 8, 1, 1, "F");
-    setText(doc, 6.2, colors.white, "bold");
-    doc.text(example.selected ? "VALGT" : example.status === "pass" ? "PASSER" : example.status === "warn" ? "VERIFISER" : "PASSER IKKE", x + 20, y + 10.5, { align: "center" });
-    setText(doc, 9, colors.ink, "bold");
-    doc.text(doc.splitTextToSize(example.label, 45).slice(0, 2), x + 39, y + 9);
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+    doc.addPage();
+    addPageTitle(
+      doc,
+      `3D-eksempler fra containerstudien ${pageIndex + 1}/${pageCount}`,
+      "Alle registrerte lasttyper vist med faktisk pakkematematikk, orientering og innlastingsstatus"
+    );
+    const pageExamples = examples.slice(pageIndex * 3, pageIndex * 3 + 3);
+    pageExamples.forEach((example, index) => {
+      const x = 12 + index * 92;
+      const y = 37;
+      doc.setFillColor(...colors.paper);
+      doc.setDrawColor(...colors.line);
+      doc.roundedRect(x, y, 88, 135, 2.5, 2.5, "FD");
+      doc.setFillColor(...getStatusColor(example.status));
+      doc.roundedRect(x + 5, y + 5, 30, 8, 1, 1, "F");
+      setText(doc, 6.2, colors.white, "bold");
+      doc.text(example.selected ? "VALGT" : example.status === "pass" ? "PASSER" : example.status === "warn" ? "VERIFISER" : "PASSER IKKE", x + 20, y + 10.5, { align: "center" });
+      setText(doc, 9, colors.ink, "bold");
+      doc.text(doc.splitTextToSize(example.label, 45).slice(0, 2), x + 39, y + 9);
 
-    doc.setFillColor(...colors.dark);
-    doc.roundedRect(x + 5, y + 19, 78, 70, 2, 2, "F");
-    if (example.imageData) {
-      doc.addImage(example.imageData, "PNG", x + 7, y + 21, 74, 66, undefined, "FAST");
-    } else {
-      setText(doc, 7, [166, 196, 196], "bold");
-      doc.text("3D-bilde ikke klart", x + 44, y + 55, { align: "center" });
-    }
+      doc.setFillColor(...colors.dark);
+      doc.roundedRect(x + 5, y + 19, 78, 70, 2, 2, "F");
+      if (example.imageData) {
+        doc.addImage(example.imageData, "PNG", x + 7, y + 21, 74, 66, undefined, "FAST");
+      } else {
+        setText(doc, 7, [166, 196, 196], "bold");
+        doc.text("3D-bilde ikke klart", x + 44, y + 55, { align: "center" });
+      }
 
-    setText(doc, 9, getStatusColor(example.status), "bold");
-    doc.text(example.statusLabel, x + 5, y + 99);
+      setText(doc, 9, getStatusColor(example.status), "bold");
+      doc.text(example.statusLabel, x + 5, y + 99);
+      setText(doc, 7, colors.muted);
+      doc.text(`Antall på gulv: ${example.result.count}`, x + 5, y + 107);
+      doc.text(`Orientering: ${example.result.selectedOrientation === "rotated" ? "90 grader" : "standard"}`, x + 5, y + 113);
+      doc.text(`Klaring over: ${formatMillimeters(example.result.heightClearanceTop)}`, x + 5, y + 119);
+      const opening = example.result.verifiedAccess?.label || (example.result.accessBlocked ? "ingen åpning passer" : "åpning må verifiseres");
+      doc.text(doc.splitTextToSize(`Innlasting: ${opening}`, 77).slice(0, 2), x + 5, y + 125);
+    });
+
+    setText(doc, 8, colors.ink, "bold");
+    doc.text("Slik leses 3D-bildene", 12, 184);
     setText(doc, 7, colors.muted);
-    doc.text(`Antall på gulv: ${example.result.count}`, x + 5, y + 107);
-    doc.text(`Orientering: ${example.result.selectedOrientation === "rotated" ? "90 grader" : "standard"}`, x + 5, y + 113);
-    doc.text(`Klaring over: ${formatMillimeters(example.result.heightClearanceTop)}`, x + 5, y + 119);
-    const opening = example.result.verifiedAccess?.label || (example.result.accessBlocked ? "ingen åpning passer" : "åpning må verifiseres");
-    doc.text(doc.splitTextToSize(`Innlasting: ${opening}`, 77).slice(0, 2), x + 5, y + 125);
-  });
-
-  setText(doc, 8, colors.ink, "bold");
-  doc.text("Slik leses 3D-bildene", 12, 184);
-  setText(doc, 7, colors.muted);
-  doc.text(doc.splitTextToSize("Containeren vises transparent. Lasten er plassert med simulatorens valgte orientering, og hard-top-profilene vises i taksonen. Grønn status betyr at minst én registrert åpning kan brukes. Gul status betyr at lasten passer innvendig, men registrerte åpninger eller praktisk innføring må verifiseres.", 250), 12, 190);
+    doc.text(doc.splitTextToSize("Containeren vises transparent. Lasten er plassert med simulatorens beregnede orientering. Grønn betyr at en registrert åpning kan brukes. Gul betyr at lasten passer innvendig, men åpning eller praktisk innføring må verifiseres. Rød betyr geometrisk konflikt.", 250), 12, 190);
+  }
 }
 
 function addWarehouseScenarioPage(doc, data, scenario, index) {
@@ -523,6 +570,61 @@ function addWarehouseComparisonPage(doc, data) {
     setText(doc, 6.4, colors.muted);
     doc.text(doc.splitTextToSize(body, 77), x + 4, 165);
   });
+}
+
+function addAisleCapacityPage(doc, data) {
+  doc.addPage();
+  addPageTitle(doc, "Kapasitetsdiagrammer - avstander og kjøregang", "Antall gulvplasser i arkitektmodellen med rosa felt inkludert og slusefeltene fratrukket");
+  const comparisonSeries = [
+    { key: "withoutAisle", label: "Uten kjøregang", color: colors.teal },
+    { key: "withAisle", label: "Med kjøregang", color: colors.cyan }
+  ];
+  const gapData = data.warehouseAnalysis.containerGapAisleComparison || [];
+  const wallData = data.warehouseAnalysis.wallClearanceAisleComparison || [];
+  drawGroupedBarChart(doc, 14, 39, 126, 66, "Containeravstand", gapData, comparisonSeries);
+  drawGroupedBarChart(doc, 158, 39, 125, 66, "Avstand fra vegg", wallData, comparisonSeries);
+
+  const selectedGap = gapData.reduce((nearest, item) => (
+    !nearest || Math.abs(item.gap - data.settings.containerGap) < Math.abs(nearest.gap - data.settings.containerGap) ? item : nearest
+  ), null);
+  drawMetricCard(doc, 14, 112, 61, "Valgt containeravstand", formatMeters(data.settings.containerGap, 2), "diagrammet viser nærmeste punkt");
+  drawMetricCard(doc, 79, 112, 61, "Kapasitet uten gang", selectedGap?.withoutAisle ?? "-", "gulvplasser ved nærmeste punkt");
+  drawMetricCard(doc, 158, 112, 61, "Kapasitet med gang", selectedGap?.withAisle ?? "-", "gulvplasser ved nærmeste punkt");
+  drawMetricCard(doc, 223, 112, 60, "Kjøregangsbredde", formatMeters(data.container.width + data.settings.aisleSideClearance * 2, 3), "containerbredde + slingring");
+
+  const drawComparisonTable = (x, title, rows, labelTitle) => {
+    setText(doc, 8.5, colors.ink, "bold");
+    doc.text(title, x, 148);
+    const columns = [
+      [labelTitle, x + 3],
+      ["Uten", x + 43],
+      ["Med", x + 68],
+      ["Tap", x + 91],
+      ["Tap %", x + 111]
+    ];
+    doc.setFillColor(...colors.dark);
+    doc.roundedRect(x, 152, 126, 9, 1, 1, "F");
+    columns.forEach(([label, columnX]) => {
+      setText(doc, 6.1, colors.white, "bold");
+      doc.text(label, columnX, 158);
+    });
+    rows.forEach((row, index) => {
+      const y = 162 + index * 8;
+      const loss = row.withoutAisle - row.withAisle;
+      const lossPercent = row.withoutAisle > 0 ? (loss / row.withoutAisle) * 100 : 0;
+      doc.setFillColor(...(index % 2 === 0 ? [247, 250, 249] : [239, 245, 243]));
+      doc.setDrawColor(...colors.line);
+      doc.rect(x, y, 126, 7, "FD");
+      setText(doc, 6.2, colors.ink, index === 0 ? "bold" : "normal");
+      doc.text(row.label, x + 3, y + 4.8);
+      doc.text(String(row.withoutAisle), x + 47, y + 4.8, { align: "right" });
+      doc.text(String(row.withAisle), x + 72, y + 4.8, { align: "right" });
+      doc.text(String(loss), x + 96, y + 4.8, { align: "right" });
+      doc.text(`${formatNumber(lossPercent, 0)} %`, x + 123, y + 4.8, { align: "right" });
+    });
+  };
+  drawComparisonTable(14, "Tallgrunnlag - containeravstand", gapData, "Avstand");
+  drawComparisonTable(158, "Tallgrunnlag - veggavstand", wallData, "Avstand");
 }
 
 function addStackingPage(doc, data) {
@@ -851,9 +953,10 @@ export async function generateContainerStudyPdf(input) {
   }));
 
   addSummaryPage(doc, data, imageData);
-  add3DExamplesPage(doc, data, imageData, previewImages);
+  addAll3DExamplesPages(doc, data, imageData, previewImages);
   (data.warehouseAnalysis?.scenarios || []).forEach((scenario, index) => addWarehouseScenarioPage(doc, data, scenario, index));
   if (data.warehouseAnalysis?.scenarios?.length) addWarehouseComparisonPage(doc, data);
+  if (data.warehouseAnalysis?.containerGapAisleComparison?.length) addAisleCapacityPage(doc, data);
   addStackingPage(doc, data);
   addLoadMatrixPage(doc, data);
   addLoadWeightAnalysisPage(doc, data);

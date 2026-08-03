@@ -441,6 +441,10 @@ function buildReportWarehouseScenario(container, settings, definition) {
 function buildArchitecturalWarehouseReport(container, settings) {
   const scenarios = reportWarehouseScenarioDefinitions.map((definition) => buildReportWarehouseScenario(container, settings, definition));
   const referenceDefinition = reportWarehouseScenarioDefinitions[1];
+  const buildAisleComparison = (overrides) => ({
+    withoutAisle: buildReportWarehouseScenario(container, { ...settings, ...overrides, reserveAisle: false }, referenceDefinition).totalFloorSlots,
+    withAisle: buildReportWarehouseScenario(container, { ...settings, ...overrides, reserveAisle: true }, referenceDefinition).totalFloorSlots
+  });
   return {
     planWidth: 16.85 * 2 + separatorWidth,
     planLength: 34,
@@ -452,6 +456,16 @@ function buildArchitecturalWarehouseReport(container, settings) {
     containerGapSeries: [0.1, 0.25, 0.5, 1].map((gap) => ({
       label: `${gap.toFixed(2)} m`,
       value: buildReportWarehouseScenario(container, { ...settings, containerGap: gap }, referenceDefinition).totalFloorSlots
+    })),
+    wallClearanceAisleComparison: [0.2, 0.5, 1, 1.5].map((clearance) => ({
+      label: `${clearance.toFixed(1)} m`,
+      clearance,
+      ...buildAisleComparison({ wallClearance: clearance })
+    })),
+    containerGapAisleComparison: [0.1, 0.25, 0.5, 1].map((gap) => ({
+      label: `${gap.toFixed(2)} m`,
+      gap,
+      ...buildAisleComparison({ containerGap: gap })
     }))
   };
 }
@@ -1130,7 +1144,7 @@ function buildContainerReportLoadRows(container, spacing) {
   });
 }
 
-async function waitForReportCanvases(elements, timeoutMs = 2500) {
+async function waitForReportCanvases(elements, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const ready = elements.every((element) => {
@@ -1157,14 +1171,7 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
   const load = loadTypes[studyLoadKey] || loadTypes.steel1;
   const result = useMemo(() => getPackingStudy(container, load, studyOrientation, studySpacing), [container, load, studyOrientation, studySpacing]);
   const reportLoadRows = useMemo(() => buildContainerReportLoadRows(container, studySpacing), [container, studySpacing]);
-  const reportPreviewRows = useMemo(() => {
-    const candidates = reportLoadRows.filter((row) => row.key !== studyLoadKey);
-    const passRow = candidates.find((row) => row.status === "pass");
-    const issueRow = candidates.find((row) => row.status !== "pass");
-    return [passRow, issueRow]
-      .filter(Boolean)
-      .filter((row, index, rows) => rows.findIndex((item) => item.key === row.key) === index);
-  }, [reportLoadRows, studyLoadKey]);
+  const reportPreviewRows = useMemo(() => reportLoadRows.filter((row) => row.key !== studyLoadKey), [reportLoadRows, studyLoadKey]);
   const isTight = result.compatible && result.criticalClearance < 0.05;
   const isOpeningTight = [result.frontAccess, result.topAccess].some((access) => access.compatible && access.criticalClearance < 0.05);
   const reserveAisle = reportSettings.reserveAisle ?? containerReportDefaults.reserveAisle;
@@ -1263,7 +1270,7 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
 
       <section className="study-report-panel" aria-label="PDF-rapport for containerstudie">
         <div className="study-report-heading">
-          <div><p className="eyebrow">Dokumentasjon</p><h3>PDF-rapport for valgt container</h3><p>Detaljert rapport med samme arkitektmodell som appen, tre lageralternativer, 3D-bilder, last-/vektanalyser, stabling og klaringer.</p></div>
+          <div><p className="eyebrow">Dokumentasjon</p><h3>PDF-rapport for valgt container</h3><p>Detaljert rapport med samme arkitektmodell som appen, alle lasttyper i 3D, tre lageralternativer, kapasitetsdiagrammer, stabling og klaringer.</p></div>
           <div className="study-report-actions">
             <button type="button" className="study-report-button" onClick={generateReport} disabled={reportState.generating}>
               <FileDown size={19} />{reportState.generating ? "Bygger rapport …" : "Generer PDF-rapport"}
