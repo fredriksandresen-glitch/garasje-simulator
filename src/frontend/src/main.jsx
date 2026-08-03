@@ -267,7 +267,7 @@ const rooms = [
     x: 0,
     width: 16.85,
     baseLength: 24.115,
-    usableLength: 22.015,
+    usableLength: 24.115,
     obstructions: [
       { key: "personsluse1", label: "Personsluse 1", x: 16.85 - 4.85, y: 24.115 - 1.8, width: 4.85, length: 1.8, type: "yellow" }
     ]
@@ -301,38 +301,57 @@ function rectangleIntersectionArea(a, b) {
   return overlapWidth * overlapLength;
 }
 
-function buildRoomSlotGrid({ room, storageLength, containerPlacement, wallClearance, doorClearance, aisleGap, includeMarkedAreas }) {
+function buildRoomSlotGrid({ room, storageLength, containerPlacement, wallClearance, doorClearance, aisleGap, includeMarkedAreas, transportAisleWidth }) {
   const footprint = { length: containerPlacement.length + aisleGap, width: containerPlacement.width + aisleGap };
   const clearWidth = Math.max(0, room.width - wallClearance * 2);
   const clearLength = Math.max(0, storageLength - doorClearance);
   const cols = Math.max(0, Math.floor(clearLength / footprint.length));
-  const rows = Math.max(0, Math.floor(clearWidth / footprint.width));
+  const boundedAisleWidth = Math.min(clearWidth, Math.max(0, transportAisleWidth));
+  const aisleStart = wallClearance + (clearWidth - boundedAisleWidth) / 2;
+  const transportAisle = boundedAisleWidth > 0
+    ? { x: aisleStart, y: wallClearance, width: boundedAisleWidth, length: clearLength }
+    : null;
+  const lateralZones = transportAisle
+    ? [
+        { x: wallClearance, width: Math.max(0, transportAisle.x - wallClearance) },
+        { x: transportAisle.x + transportAisle.width, width: Math.max(0, room.width - wallClearance - transportAisle.x - transportAisle.width) }
+      ]
+    : [{ x: wallClearance, width: clearWidth }];
   const slots = [];
+  let rows = 0;
 
-  for (let col = 0; col < cols; col += 1) {
-    for (let row = 0; row < rows; row += 1) {
-      const rectangle = {
-        x: wallClearance + row * footprint.width,
-        y: wallClearance + col * footprint.length,
-        width: containerPlacement.width,
-        length: containerPlacement.length
-      };
-      const blockedBy = (room.obstructions || []).find((obstruction) => rectanglesOverlap(rectangle, obstruction)) || null;
-      slots.push({
-        key: `${room.key}-${col}-${row}`,
-        ...rectangle,
-        blockedBy,
-        blocked: !includeMarkedAreas && Boolean(blockedBy)
-      });
+  lateralZones.forEach((zone, zoneIndex) => {
+    const zoneRows = Math.max(0, Math.floor(zone.width / footprint.width));
+    const centeredOffset = Math.max(0, (zone.width - zoneRows * footprint.width) / 2);
+    rows += zoneRows;
+    for (let col = 0; col < cols; col += 1) {
+      for (let row = 0; row < zoneRows; row += 1) {
+        const rectangle = {
+          x: zone.x + centeredOffset + row * footprint.width,
+          y: wallClearance + col * footprint.length,
+          width: containerPlacement.width,
+          length: containerPlacement.length
+        };
+        const blockedBy = (room.obstructions || []).find((obstruction) => rectanglesOverlap(rectangle, obstruction)) || null;
+        slots.push({
+          key: `${room.key}-${col}-${zoneIndex}-${row}`,
+          ...rectangle,
+          blockedBy,
+          blocked: !includeMarkedAreas && Boolean(blockedBy)
+        });
+      }
     }
-  }
+  });
 
-  const clearArea = { x: wallClearance, y: wallClearance, width: clearWidth, length: clearLength };
-  const obstructedArea = includeMarkedAreas
-    ? 0
-    : (room.obstructions || []).reduce((sum, obstruction) => sum + rectangleIntersectionArea(clearArea, obstruction), 0);
+  const effectiveArea = lateralZones.reduce((total, zone) => {
+    const zoneArea = { x: zone.x, y: wallClearance, width: zone.width, length: clearLength };
+    const obstructedArea = includeMarkedAreas
+      ? 0
+      : (room.obstructions || []).reduce((sum, obstruction) => sum + rectangleIntersectionArea(zoneArea, obstruction), 0);
+    return total + Math.max(0, zone.width * clearLength - obstructedArea);
+  }, 0);
 
-  return { slots, cols, rows, clearWidth, clearLength, effectiveArea: Math.max(0, clearWidth * clearLength - obstructedArea) };
+  return { slots, cols, rows, clearWidth, clearLength, effectiveArea, transportAisle };
 }
 
 function App() {
@@ -344,6 +363,8 @@ function App() {
   const [wallClearance, setWallClearance] = usePersistentState("wallClearance", 0.5);
   const [doorClearance, setDoorClearance] = usePersistentState("doorClearance", 0.9);
   const [aisleGap, setAisleGap] = usePersistentState("aisleGap", 0.8);
+  const [reserveTransportAisle, setReserveTransportAisle] = usePersistentState("reserveTransportAisle", false);
+  const [transportAisleSideClearance, setTransportAisleSideClearance] = usePersistentState("transportAisleSideClearance", 0.5);
   const [useLager2Extension, setUseLager2Extension] = usePersistentState("useLager2Extension", true);
   const [includeMarkedAreas, setIncludeMarkedAreas] = usePersistentState("includeMarkedAreas", false);
   const [rotateContainers, setRotateContainers] = usePersistentState("rotateContainers", false);
@@ -385,6 +406,10 @@ function App() {
     const containerPlacement = rotateContainers
       ? { length: container.width, width: container.length }
       : { length: container.length, width: container.width };
+    const transportContainerWidth = Math.max(...containerCandidates.map((candidate) => candidate.width));
+    const transportAisleWidth = reserveTransportAisle
+      ? transportContainerWidth + transportAisleSideClearance * 2
+      : 0;
     const containerStackLevels = (candidate) => {
       const isHalfHeight = candidate.halfHeight || candidate.height < 1.6;
       const maxForHeight = Math.max(1, Math.floor(heightLimit / candidate.height));
@@ -397,7 +422,7 @@ function App() {
     const roomModels = rooms.map((room) => {
       const storageLength = room.key === "lager2" && useLager2Extension ? room.extendedLength : room.usableLength;
       const displayLength = room.key === "lager1" ? room.baseLength : room.extendedLength;
-      const grid = buildRoomSlotGrid({ room, storageLength, containerPlacement, wallClearance, doorClearance, aisleGap, includeMarkedAreas });
+      const grid = buildRoomSlotGrid({ room, storageLength, containerPlacement, wallClearance, doorClearance, aisleGap, includeMarkedAreas, transportAisleWidth });
       const blockedSlots = grid.slots.filter((slot) => slot.blocked);
       const availableSlots = grid.slots.filter((slot) => !slot.blocked);
       const floorSlots = availableSlots.length;
@@ -417,6 +442,7 @@ function App() {
         doorClearance,
         includeMarkedAreas,
         useLager2Extension,
+        transportAisle: grid.transportAisle,
         effectiveArea: grid.effectiveArea,
         leftPct: (room.x / planWidth) * 100,
         topPct: ((planLength - displayLength) / planLength) * 100,
@@ -545,6 +571,8 @@ function App() {
       containerCandidates,
       containerPlacement,
       containerRotated: rotateContainers,
+      transportContainerWidth,
+      transportAisleWidth,
       levels,
       planWidth,
       planLength,
@@ -570,6 +598,8 @@ function App() {
     wallClearance,
     doorClearance,
     aisleGap,
+    reserveTransportAisle,
+    transportAisleSideClearance,
     useLager2Extension,
     includeMarkedAreas,
     rotateContainers,
@@ -663,6 +693,12 @@ function App() {
             )}
             <Slider label="Avstand til personsluser/dører" value={doorClearance} min={0.3} max={2} step={0.1} unit="m" onChange={setDoorClearance} />
             <Slider label="Gang/luft mellom containere" value={aisleGap} min={0.1} max={2.5} step={0.1} unit="m" onChange={setAisleGap} />
+            <Toggle label="Reserver sentrert kjøregang i hvert lager" checked={reserveTransportAisle} onChange={setReserveTransportAisle} />
+            {reserveTransportAisle && <Slider label="Slingringsmonn i kjøregang, per side" value={transportAisleSideClearance} min={0} max={1.5} step={0.05} unit="m" onChange={setTransportAisleSideClearance} />}
+            <div className="container-note">
+              <strong>Kjøregang: {reserveTransportAisle ? `${model.transportAisleWidth.toFixed(3)} m` : "ikke reservert"}</strong>
+              {reserveTransportAisle && <div>{model.transportContainerWidth.toFixed(3)} m containerbredde + 2 × {transportAisleSideClearance.toFixed(2)} m slingring. Feltet vises i plantegningen og trekkes fra kapasiteten.</div>}
+            </div>
             <Slider label="Veggklarering" value={wallClearance} min={0} max={1.5} step={0.1} unit="m" onChange={setWallClearance} />
             <Toggle label="Ta med rosa felt i Lager 2" checked={useLager2Extension} onChange={setUseLager2Extension} />
             <Toggle label="Ta med gule slusefelt som lagerareal" checked={includeMarkedAreas} onChange={setIncludeMarkedAreas} />
@@ -1259,6 +1295,7 @@ function ArchitecturalPlan({ model, includeMarkedAreas, useLager2Extension }) {
         <span><i className="legend-steel" />Stålkasser</span>
         <span><i className="legend-kokille" />Kokiller</span>
         <span><i className="legend-blocked" />Gule felt</span>
+        <span><i className="legend-transport-aisle" />Kjøregang</span>
         <span><i className="legend-extension" />Utvidet areal</span>
         <span className="plan-scale-note">Arkitektens utvendige byggmål: B 36 200 × L 36 000 mm. Planmodellen viser innvendig lagergeometri: B 34 200 × maks L 34 000 mm.</span>
         <span className="plan-scale-note">Containere vises med utvendig L × B i samme målestokk som lageret.</span>
@@ -1314,6 +1351,19 @@ function PlanRoom({ room, model }) {
           {obstruction.label}<br />{obstruction.width.toFixed(2)} x {obstruction.length.toFixed(2)} m<br />{room.includeMarkedAreas ? "inkludert" : "fratrukket"}
         </div>
       ))}
+      {room.transportAisle && (
+        <div
+          className="room-transport-aisle"
+          style={{
+            left: `${(room.transportAisle.x / room.width) * 100}%`,
+            top: `${((room.displayLength - room.transportAisle.y - room.transportAisle.length) / room.displayLength) * 100}%`,
+            width: `${(room.transportAisle.width / room.width) * 100}%`,
+            height: `${(room.transportAisle.length / room.displayLength) * 100}%`
+          }}
+        >
+          <span>Kjøregang<br />{room.transportAisle.width.toFixed(2)} m</span>
+        </div>
+      )}
       {room.extension && (
         <div
           className={`room-extension ${room.useLager2Extension ? "included" : "excluded"}`}
