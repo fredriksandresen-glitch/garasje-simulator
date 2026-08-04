@@ -1373,6 +1373,7 @@ function StackingAnalysis() {
     const payloadCount = specs.payload > 0 ? Math.max(0, Math.floor(specs.payload / effectiveLoadWeights[key])) : null;
     return [key, {
       packing,
+      verticalLayers,
       geometricCount,
       payloadCount,
       maxCount: payloadCount === null ? geometricCount : Math.min(geometricCount, payloadCount)
@@ -1528,8 +1529,8 @@ function StackingAnalysis() {
                     const className = level.load?.shareKey || "empty";
                     const levelFails = !level.ownPass || level.stackingPass === false || index >= allowedHeightLevels;
                     return <article className={`stack-level ${className} ${levelFails ? "fails" : ""}`} key={`${level.loadKey}-${index}`} style={{ height: `${100 / levelDetails.length}%`, bottom: `${(index * 100) / levelDetails.length}%` }}>
-                      <StackLevelPayload load={level.load} quantity={level.quantity} />
-                      <div><strong>Nivå {index + 1}{index === 0 ? " · bunn" : ""}</strong><span>{level.load ? `${level.quantity} × ${level.load.shortLabel}` : "Tom container"}</span></div>
+                      <StackLevelPayload load={level.load} quantity={level.quantity} capacity={level.capacity} container={container} spacing={packageSpacing} />
+                      <div><strong>Nivå {index + 1}{index === 0 ? " · bunn" : ""}</strong><span>{level.load ? `${level.quantity} × ${level.load.shortLabel} · L ${level.capacity.packing.itemLength.toFixed(2)} × H ${level.load.size.height.toFixed(2)} m` : "Tom container"}</span></div>
                       <div><strong>{formatNumber(level.grossWeight)} kg</strong><span>over: {formatNumber(level.loadAbove)} kg</span></div>
                     </article>;
                   })}
@@ -1573,13 +1574,37 @@ function StackingAnalysis() {
   );
 }
 
-function StackLevelPayload({ load, quantity }) {
-  if (!load || quantity <= 0) return <div className="stack-payload-visual empty" aria-hidden="true" />;
-  const visibleCount = Math.min(quantity, load.shareKey === "drum" ? 12 : 6);
+function StackLevelPayload({ load, quantity, capacity, container, spacing }) {
+  if (!load || quantity <= 0 || !capacity?.packing?.compatible) return <div className="stack-payload-visual empty" aria-hidden="true" />;
+  const { packing, verticalLayers } = capacity;
+  const rows = Math.max(1, packing.rows);
+  const cols = Math.max(1, packing.cols);
+  const slotsPerLayer = rows * cols;
+  const floorOffset = Math.max(0, (container.height - container.usableHeight) / 2);
+  const symbols = [];
+
+  for (let layer = 0; layer < Math.max(1, verticalLayers); layer += 1) {
+    const layerQuantity = Math.min(slotsPerLayer, Math.max(0, quantity - layer * slotsPerLayer));
+    if (layerQuantity <= 0) break;
+    const occupiedRows = Math.min(rows, Math.ceil(layerQuantity / cols));
+    const usedLength = occupiedRows * packing.itemLength + Math.max(0, occupiedRows - 1) * spacing;
+    const startLength = Math.max(0, (container.length - usedLength) / 2);
+    for (let row = 0; row < occupiedRows; row += 1) {
+      const depthCount = Math.min(cols, Math.max(0, layerQuantity - row * cols));
+      symbols.push({
+        key: `${layer}-${row}`,
+        depthCount,
+        left: ((startLength + row * (packing.itemLength + spacing)) / container.length) * 100,
+        bottom: ((floorOffset + layer * (load.size.height + spacing)) / container.height) * 100,
+        width: (packing.itemLength / container.length) * 100,
+        height: (load.size.height / container.height) * 100
+      });
+    }
+  }
+
   return (
     <div className={`stack-payload-visual ${load.shareKey}`} aria-hidden="true">
-      {Array.from({ length: visibleCount }, (_, index) => <i key={index} />)}
-      {quantity > visibleCount && <b>×{quantity}</b>}
+      {symbols.map((symbol) => <i key={symbol.key} style={{ left: `${symbol.left}%`, bottom: `${symbol.bottom}%`, width: `${symbol.width}%`, height: `${symbol.height}%` }}>{symbol.depthCount > 1 && <em>×{symbol.depthCount}</em>}</i>)}
     </div>
   );
 }
