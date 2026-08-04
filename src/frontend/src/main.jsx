@@ -945,6 +945,10 @@ const stackAnalysisInitialLevels = [
   { loadKey: "empty", quantity: 0 }
 ];
 
+const stackAnalysisDefaultWeights = Object.fromEntries(
+  Object.entries(loadTypes).map(([key, load]) => [key, load.defaultWeight])
+);
+
 function getStackSpecificationDefaults(containerKey) {
   const container = studyContainerOptions[containerKey] || containerTypes.hardtop10hhbk2;
   const tare = Number.isFinite(container.tare) ? container.tare : 0;
@@ -1344,6 +1348,7 @@ function StackingAnalysis() {
   const [roofHeight, setRoofHeight] = usePersistentState("stackAnalysisRoofHeight", 6);
   const [topClearance, setTopClearance] = usePersistentState("stackAnalysisTopClearance", 0.2);
   const [packageSpacing, setPackageSpacing] = usePersistentState("stackAnalysisPackageSpacing", 0.05);
+  const [loadWeights, setLoadWeights] = usePersistentState("stackAnalysisLoadWeights", stackAnalysisDefaultWeights);
   const [levels, setLevels] = usePersistentState("stackAnalysisLevels", stackAnalysisInitialLevels);
   const [referenceLoadKey, setReferenceLoadKey] = usePersistentState("stackAnalysisReferenceLoad", "drum210");
   const [referenceQuantity, setReferenceQuantity] = usePersistentState("stackAnalysisReferenceQuantity", 12);
@@ -1355,26 +1360,31 @@ function StackingAnalysis() {
   }, [containerKey, specs.containerKey, setSpecs]);
 
   const safeLevels = Array.isArray(levels) && levels.length > 0 ? levels.slice(0, 12) : stackAnalysisInitialLevels;
+  const effectiveLoadWeights = useMemo(() => Object.fromEntries(Object.entries(loadTypes).map(([key, load]) => [
+    key,
+    Number.isFinite(Number(loadWeights?.[key])) && Number(loadWeights[key]) > 0 ? Number(loadWeights[key]) : load.defaultWeight
+  ])), [loadWeights]);
   const loadCapacities = useMemo(() => Object.fromEntries(Object.entries(loadTypes).map(([key, load]) => {
     const packing = getPackingStudy(container, load, "auto", packageSpacing);
     const verticalLayers = packing.compatible
       ? Math.max(1, Math.floor((container.usableHeight + packageSpacing) / (load.size.height + packageSpacing)))
       : 0;
     const geometricCount = packing.count * verticalLayers;
-    const payloadCount = specs.payload > 0 ? Math.max(0, Math.floor(specs.payload / load.defaultWeight)) : null;
+    const payloadCount = specs.payload > 0 ? Math.max(0, Math.floor(specs.payload / effectiveLoadWeights[key])) : null;
     return [key, {
       packing,
       geometricCount,
       payloadCount,
       maxCount: payloadCount === null ? geometricCount : Math.min(geometricCount, payloadCount)
     }];
-  })), [container, packageSpacing, specs.payload]);
+  })), [container, effectiveLoadWeights, packageSpacing, specs.payload]);
 
   const levelDetails = safeLevels.map((level, index) => {
     const load = level.loadKey === "empty" ? null : loadTypes[level.loadKey] || loadTypes.drum210;
     const capacity = load ? loadCapacities[level.loadKey] || loadCapacities.drum210 : null;
     const quantity = load ? Math.max(0, Math.round(Number(level.quantity) || 0)) : 0;
-    const payloadWeight = load ? quantity * load.defaultWeight : 0;
+    const unitWeight = load ? effectiveLoadWeights[level.loadKey] || load.defaultWeight : 0;
+    const payloadWeight = load ? quantity * unitWeight : 0;
     const grossWeight = Math.max(0, specs.tare) + payloadWeight;
     const geometricPass = !load || quantity <= capacity.geometricCount;
     const payloadPass = specs.payload <= 0 || payloadWeight <= specs.payload;
@@ -1385,6 +1395,7 @@ function StackingAnalysis() {
       load,
       capacity,
       quantity,
+      unitWeight,
       payloadWeight,
       grossWeight,
       geometricPass,
@@ -1414,7 +1425,7 @@ function StackingAnalysis() {
   const referenceLoad = loadTypes[referenceLoadKey] || loadTypes.drum210;
   const referenceCapacity = loadCapacities[referenceLoadKey] || loadCapacities.drum210;
   const normalizedReferenceQuantity = Math.max(0, Math.round(Number(referenceQuantity) || 0));
-  const referencePayload = normalizedReferenceQuantity * referenceLoad.defaultWeight;
+  const referencePayload = normalizedReferenceQuantity * (effectiveLoadWeights[referenceLoadKey] || referenceLoad.defaultWeight);
   const referenceGross = Math.max(0, specs.tare) + referencePayload;
   const referenceOwnPass = normalizedReferenceQuantity <= referenceCapacity.geometricCount
     && (specs.payload <= 0 || referencePayload <= specs.payload)
@@ -1427,6 +1438,7 @@ function StackingAnalysis() {
     : 0;
 
   const updateSpec = (key, value) => setSpecs((current) => ({ ...current, [key]: Math.max(0, Number(value) || 0) }));
+  const updateLoadWeight = (key, value) => setLoadWeights((current) => ({ ...stackAnalysisDefaultWeights, ...current, [key]: Math.max(1, Number(value) || 1) }));
   const updateLevel = (index, changes) => setLevels((current) => {
     const next = (Array.isArray(current) && current.length > 0 ? current : stackAnalysisInitialLevels).slice(0, 12);
     next[index] = { ...next[index], ...changes };
@@ -1483,6 +1495,11 @@ function StackingAnalysis() {
             <label><span>Sertifisert maks nivåer</span><div><input type="number" min="0" max="12" step="1" value={specs.certifiedMax} onChange={(event) => updateSpec("certifiedMax", event.target.value)} /><small>stk</small></div></label>
           </div>
 
+          <div className="stack-load-weights">
+            <div><span>Lastvekt per kolli</span><small>Bruk faktisk eller konservativ vekt for hver lasttype.</small></div>
+            {Object.entries(loadTypes).map(([key, item]) => <label key={key}><span>{item.label}</span><div><input aria-label={`Vekt per ${item.label}`} type="number" min="1" step="10" value={effectiveLoadWeights[key]} onChange={(event) => updateLoadWeight(key, event.target.value)} /><small>kg/stk</small></div></label>)}
+          </div>
+
           <div className="stack-reference-builder">
             <div><strong>Automatisk maksimum</strong><small>Fyll en ensartet referansestabel innenfor registrerte grenser.</small></div>
             <label><span>Lasttype</span><select value={referenceLoadKey} onChange={(event) => {
@@ -1498,23 +1515,30 @@ function StackingAnalysis() {
 
         <div className="stack-analysis-main">
           <section className="stack-side-card" aria-label="Lager og containerstabel sett fra siden">
-            <div className="stack-side-heading"><div><h3>Lageret sett fra siden</h3><p>{container.shortLabel} · utvendig H {container.height.toFixed(3)} m</p></div><strong>{levelDetails.length} nivåer · {stackHeight.toFixed(3)} m</strong></div>
+            <div className="stack-side-heading"><div><h3>Lageret sett fra siden</h3><p>{container.shortLabel} · utvendig L {container.length.toFixed(3)} × H {container.height.toFixed(3)} m</p></div><strong>{levelDetails.length} nivåer · {stackHeight.toFixed(3)} m</strong></div>
             <div className="stack-elevation">
-              {heightTicks.map((tick) => <div className="stack-height-tick" key={tick} style={{ bottom: `${(tick / roofHeight) * 100}%` }}><span>{tick} m</span></div>)}
-              <div className="stack-roof-line"><span>Tak {roofHeight.toFixed(1)} m</span></div>
-              <div className="stack-top-clearance" style={{ height: `${Math.min(100, (topClearance / roofHeight) * 100)}%` }}><span>{topClearance.toFixed(2)} m klaring</span></div>
-              <div className="stack-floor-line"><span>Gulv ±0,00</span></div>
-              <div className="stack-column">
-                {evaluatedLevels.map((level, index) => {
-                  const className = level.load?.shareKey || "empty";
-                  const levelFails = !level.ownPass || level.stackingPass === false || index >= allowedHeightLevels;
-                  return <article className={`stack-level ${className} ${levelFails ? "fails" : ""}`} key={`${level.loadKey}-${index}`} style={{ height: `${(container.height / roofHeight) * 100}%`, bottom: `${(index * container.height / roofHeight) * 100}%` }}>
-                    <div><strong>Nivå {index + 1}{index === 0 ? " · bunn" : ""}</strong><span>{level.load ? `${level.quantity} × ${level.load.shortLabel}` : "Tom container"}</span></div>
-                    <div><strong>{formatNumber(level.grossWeight)} kg</strong><span>over: {formatNumber(level.loadAbove)} kg</span></div>
-                  </article>;
-                })}
+              <div className="stack-elevation-plot">
+                {heightTicks.map((tick) => <div className="stack-height-tick" key={tick} style={{ bottom: `${(tick / roofHeight) * 100}%` }}><span>{tick} m</span></div>)}
+                <div className="stack-roof-line"><span>Tak</span></div>
+                <div className="stack-top-clearance" style={{ height: `${Math.min(100, (topClearance / roofHeight) * 100)}%` }}><span>{topClearance.toFixed(3)} m toppklaring</span></div>
+                <div className="stack-floor-line"><span>Gulv ±0,00</span></div>
+                <div className="stack-roof-height-dimension"><span>{roofHeight.toFixed(3)} m</span></div>
+                <div className="stack-column" style={{ height: `${(stackHeight / roofHeight) * 100}%`, aspectRatio: `${container.length} / ${stackHeight}` }}>
+                  {evaluatedLevels.map((level, index) => {
+                    const className = level.load?.shareKey || "empty";
+                    const levelFails = !level.ownPass || level.stackingPass === false || index >= allowedHeightLevels;
+                    return <article className={`stack-level ${className} ${levelFails ? "fails" : ""}`} key={`${level.loadKey}-${index}`} style={{ height: `${100 / levelDetails.length}%`, bottom: `${(index * 100) / levelDetails.length}%` }}>
+                      <StackLevelPayload load={level.load} quantity={level.quantity} />
+                      <div><strong>Nivå {index + 1}{index === 0 ? " · bunn" : ""}</strong><span>{level.load ? `${level.quantity} × ${level.load.shortLabel}` : "Tom container"}</span></div>
+                      <div><strong>{formatNumber(level.grossWeight)} kg</strong><span>over: {formatNumber(level.loadAbove)} kg</span></div>
+                    </article>;
+                  })}
+                  <div className="stack-length-dimension"><span>L {container.length.toFixed(3)} m</span></div>
+                  <div className="stack-container-height-dimension" style={{ height: `${100 / levelDetails.length}%` }}><span>H {container.height.toFixed(3)} m</span></div>
+                  <div className="stack-total-height-dimension"><span>Stabel {stackHeight.toFixed(3)} m</span></div>
+                </div>
+                <div className={`stack-roof-margin ${roofMargin < 0 ? "negative" : ""}`}>{roofMargin >= 0 ? `${roofMargin.toFixed(3)} m fri høyde` : `${Math.abs(roofMargin).toFixed(3)} m over takgrensen`}</div>
               </div>
-              <div className={`stack-roof-margin ${roofMargin < 0 ? "negative" : ""}`}>{roofMargin >= 0 ? `${roofMargin.toFixed(3)} m fri høyde` : `${Math.abs(roofMargin).toFixed(3)} m over takgrensen`}</div>
             </div>
           </section>
 
@@ -1531,7 +1555,7 @@ function StackingAnalysis() {
             {evaluatedLevels.map((level, index) => (
               <div className={`stack-level-table ${!level.ownPass || level.stackingPass === false || index >= allowedHeightLevels ? "fails" : ""}`} key={`editor-${index}`}>
                 <span><strong>{index + 1}</strong><small>{index === 0 ? "bunn" : index === evaluatedLevels.length - 1 ? "topp" : "mellom"}</small></span>
-                <span><select aria-label={`Lasttype nivå ${index + 1}`} value={level.loadKey} onChange={(event) => changeLevelLoad(index, event.target.value)}><option value="empty">Tom container</option>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select><small>{level.load ? `Maks ${level.capacity.maxCount} stk med valgte grenser` : "Kun tarevekt"}</small></span>
+                <span><select aria-label={`Lasttype nivå ${index + 1}`} value={level.loadKey} onChange={(event) => changeLevelLoad(index, event.target.value)}><option value="empty">Tom container</option>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select><small>{level.load ? `Maks ${level.capacity.maxCount} stk · ${formatNumber(level.unitWeight)} kg/stk` : "Kun tarevekt"}</small></span>
                 <span><input aria-label={`Antall på nivå ${index + 1}`} type="number" min="0" max={level.capacity?.geometricCount || 0} value={level.quantity} disabled={!level.load} onChange={(event) => updateLevel(index, { quantity: Math.max(0, Math.round(Number(event.target.value) || 0)) })} /></span>
                 <span><strong>{formatNumber(level.payloadWeight)} kg</strong><small>{level.payloadPass ? "OK" : "over nyttelast"}</small></span>
                 <span><strong>{formatNumber(level.grossWeight)} kg</strong><small>{level.grossPass ? "OK" : "over max gross"}</small></span>
@@ -1546,6 +1570,17 @@ function StackingAnalysis() {
         </div>
       </div>
     </section>
+  );
+}
+
+function StackLevelPayload({ load, quantity }) {
+  if (!load || quantity <= 0) return <div className="stack-payload-visual empty" aria-hidden="true" />;
+  const visibleCount = Math.min(quantity, load.shareKey === "drum" ? 12 : 6);
+  return (
+    <div className={`stack-payload-visual ${load.shareKey}`} aria-hidden="true">
+      {Array.from({ length: visibleCount }, (_, index) => <i key={index} />)}
+      {quantity > visibleCount && <b>×{quantity}</b>}
+    </div>
   );
 }
 
