@@ -503,7 +503,7 @@ function App() {
   const [showConstraintMenu, setShowConstraintMenu] = useState(false);
 
   useEffect(() => {
-    if (planningMode !== "study" && planningMode !== "custom") setPlanningMode("study");
+    if (!['study', 'custom', 'stack'].includes(planningMode)) setPlanningMode("study");
   }, [planningMode, setPlanningMode]);
 
   const selectedContainerKeys = selectedStudyContainers.filter((key) => Boolean(studyContainerOptions[key]));
@@ -783,9 +783,10 @@ function App() {
         <nav className="mode-tabs" aria-label="Planleggingsmodus">
           <button type="button" className={planningMode === "study" ? "active" : ""} onClick={() => setPlanningMode("study")}>Containerstudie</button>
           <button type="button" className={planningMode === "custom" ? "active" : ""} disabled={selectedContainerKeys.length === 0} onClick={() => setPlanningMode("custom")}>Fri lastkombinasjon</button>
+          <button type="button" className={planningMode === "stack" ? "active" : ""} onClick={() => setPlanningMode("stack")}>Stableanalyse</button>
         </nav>
 
-        {planningMode === "study" ? <ContainerStudy selectedContainerKeys={selectedContainerKeys} onToggleContainer={toggleStudyContainer} onContinue={() => setPlanningMode("custom")} /> : <>
+        {planningMode === "study" ? <ContainerStudy selectedContainerKeys={selectedContainerKeys} onToggleContainer={toggleStudyContainer} onContinue={() => setPlanningMode("custom")} /> : planningMode === "stack" ? <StackingAnalysis /> : <>
         <section className="summary-grid">
           <SummaryCard icon={<Warehouse />} label="Lagerkapasitet" value={model.totalFloorSlots} unit="gulvplasser" />
           <SummaryCard icon={<Boxes />} label="Blandet behov" value={model.requiredFloorSlots} unit="gulvplasser" />
@@ -936,6 +937,35 @@ const containerReportDefaults = {
   aisleSideClearance: 0.5,
   topClearance: 0.2
 };
+
+const stackAnalysisInitialLevels = [
+  { loadKey: "kokille", quantity: 4 },
+  { loadKey: "steel2", quantity: 2 },
+  { loadKey: "drum210", quantity: 12 },
+  { loadKey: "empty", quantity: 0 }
+];
+
+function getStackSpecificationDefaults(containerKey) {
+  const container = studyContainerOptions[containerKey] || containerTypes.hardtop10hhbk2;
+  const tare = Number.isFinite(container.tare) ? container.tare : 0;
+  const payload = Number.isFinite(container.payload)
+    ? container.payload
+    : Number.isFinite(container.payloadEstimateMin)
+      ? container.payloadEstimateMin
+      : 0;
+  return {
+    containerKey,
+    tare,
+    payload,
+    maxGross: Number.isFinite(container.maxGross) ? container.maxGross : tare + payload,
+    stackingTestLoad: Number.isFinite(container.stackingTestLoad)
+      ? container.stackingTestLoad
+      : Number.isFinite(container.stackingTestLoadPerPost)
+        ? container.stackingTestLoadPerPost
+        : 0,
+    certifiedMax: Number.isFinite(container.maxCertifiedStackHeight) ? container.maxCertifiedStackHeight : 0
+  };
+}
 
 const studyOrientationOptions = {
   auto: { label: "Auto" },
@@ -1304,6 +1334,216 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
       <ClearancePanel result={result} isTight={isTight} />
       <div className="study-report-captures" aria-hidden="true">
         {reportPreviewRows.map((row) => <div className="study-report-capture" key={row.key} ref={(element) => { if (element) reportPreviewRefs.current[row.key] = element; }}><Container3DView container={container} load={row.load} result={row.result} spacing={studySpacing} /></div>)}
+      </div>
+    </section>
+  );
+}
+
+function StackingAnalysis() {
+  const [containerKey, setContainerKey] = usePersistentState("stackAnalysisContainer", "hardtop10hhbk2");
+  const [roofHeight, setRoofHeight] = usePersistentState("stackAnalysisRoofHeight", 6);
+  const [topClearance, setTopClearance] = usePersistentState("stackAnalysisTopClearance", 0.2);
+  const [packageSpacing, setPackageSpacing] = usePersistentState("stackAnalysisPackageSpacing", 0.05);
+  const [levels, setLevels] = usePersistentState("stackAnalysisLevels", stackAnalysisInitialLevels);
+  const [referenceLoadKey, setReferenceLoadKey] = usePersistentState("stackAnalysisReferenceLoad", "drum210");
+  const [referenceQuantity, setReferenceQuantity] = usePersistentState("stackAnalysisReferenceQuantity", 12);
+  const [specs, setSpecs] = usePersistentState("stackAnalysisSpecs", getStackSpecificationDefaults("hardtop10hhbk2"));
+  const container = studyContainerOptions[containerKey] || containerTypes.hardtop10hhbk2;
+
+  useEffect(() => {
+    if (specs.containerKey !== containerKey) setSpecs(getStackSpecificationDefaults(containerKey));
+  }, [containerKey, specs.containerKey, setSpecs]);
+
+  const safeLevels = Array.isArray(levels) && levels.length > 0 ? levels.slice(0, 12) : stackAnalysisInitialLevels;
+  const loadCapacities = useMemo(() => Object.fromEntries(Object.entries(loadTypes).map(([key, load]) => {
+    const packing = getPackingStudy(container, load, "auto", packageSpacing);
+    const verticalLayers = packing.compatible
+      ? Math.max(1, Math.floor((container.usableHeight + packageSpacing) / (load.size.height + packageSpacing)))
+      : 0;
+    const geometricCount = packing.count * verticalLayers;
+    const payloadCount = specs.payload > 0 ? Math.max(0, Math.floor(specs.payload / load.defaultWeight)) : null;
+    return [key, {
+      packing,
+      geometricCount,
+      payloadCount,
+      maxCount: payloadCount === null ? geometricCount : Math.min(geometricCount, payloadCount)
+    }];
+  })), [container, packageSpacing, specs.payload]);
+
+  const levelDetails = safeLevels.map((level, index) => {
+    const load = level.loadKey === "empty" ? null : loadTypes[level.loadKey] || loadTypes.drum210;
+    const capacity = load ? loadCapacities[level.loadKey] || loadCapacities.drum210 : null;
+    const quantity = load ? Math.max(0, Math.round(Number(level.quantity) || 0)) : 0;
+    const payloadWeight = load ? quantity * load.defaultWeight : 0;
+    const grossWeight = Math.max(0, specs.tare) + payloadWeight;
+    const geometricPass = !load || quantity <= capacity.geometricCount;
+    const payloadPass = specs.payload <= 0 || payloadWeight <= specs.payload;
+    const grossPass = specs.maxGross <= 0 || grossWeight <= specs.maxGross;
+    return {
+      ...level,
+      index,
+      load,
+      capacity,
+      quantity,
+      payloadWeight,
+      grossWeight,
+      geometricPass,
+      payloadPass,
+      grossPass,
+      ownPass: geometricPass && payloadPass && grossPass
+    };
+  });
+  const stackWeight = levelDetails.reduce((sum, level) => sum + level.grossWeight, 0);
+  const geometricHeightLimit = Math.max(0, Math.floor((Math.max(0, roofHeight - topClearance)) / container.height));
+  const certifiedHeightLimit = specs.certifiedMax > 0 ? Math.floor(specs.certifiedMax) : Infinity;
+  const allowedHeightLevels = Math.min(geometricHeightLimit, certifiedHeightLimit);
+  const stackHeight = levelDetails.length * container.height;
+  const evaluatedLevels = levelDetails.map((level, index) => {
+    const loadAbove = levelDetails.slice(index + 1).reduce((sum, upperLevel) => sum + upperLevel.grossWeight, 0);
+    const stackingPass = specs.stackingTestLoad > 0 ? loadAbove <= specs.stackingTestLoad : null;
+    const stackingMargin = specs.stackingTestLoad > 0 ? specs.stackingTestLoad - loadAbove : null;
+    return { ...level, loadAbove, stackingPass, stackingMargin };
+  });
+  const heightPass = levelDetails.length <= allowedHeightLevels;
+  const structuralPass = evaluatedLevels.every((level) => level.stackingPass !== false);
+  const loadPass = evaluatedLevels.every((level) => level.ownPass);
+  const analysisPass = heightPass && structuralPass && loadPass;
+  const baseLevel = evaluatedLevels[0];
+  const roofMargin = roofHeight - topClearance - stackHeight;
+
+  const referenceLoad = loadTypes[referenceLoadKey] || loadTypes.drum210;
+  const referenceCapacity = loadCapacities[referenceLoadKey] || loadCapacities.drum210;
+  const normalizedReferenceQuantity = Math.max(0, Math.round(Number(referenceQuantity) || 0));
+  const referencePayload = normalizedReferenceQuantity * referenceLoad.defaultWeight;
+  const referenceGross = Math.max(0, specs.tare) + referencePayload;
+  const referenceOwnPass = normalizedReferenceQuantity <= referenceCapacity.geometricCount
+    && (specs.payload <= 0 || referencePayload <= specs.payload)
+    && (specs.maxGross <= 0 || referenceGross <= specs.maxGross);
+  const referenceTestLimit = specs.stackingTestLoad > 0 && referenceGross > 0
+    ? 1 + Math.floor(specs.stackingTestLoad / referenceGross)
+    : Infinity;
+  const referenceMaxLevels = referenceOwnPass
+    ? Math.max(0, Math.min(geometricHeightLimit, certifiedHeightLimit, referenceTestLimit))
+    : 0;
+
+  const updateSpec = (key, value) => setSpecs((current) => ({ ...current, [key]: Math.max(0, Number(value) || 0) }));
+  const updateLevel = (index, changes) => setLevels((current) => {
+    const next = (Array.isArray(current) && current.length > 0 ? current : stackAnalysisInitialLevels).slice(0, 12);
+    next[index] = { ...next[index], ...changes };
+    return next;
+  });
+  const changeLevelLoad = (index, loadKey) => {
+    const defaultQuantity = loadKey === "empty" ? 0 : loadCapacities[loadKey]?.maxCount || 0;
+    updateLevel(index, { loadKey, quantity: defaultQuantity });
+  };
+  const addLevel = () => setLevels((current) => {
+    const next = Array.isArray(current) && current.length > 0 ? current : stackAnalysisInitialLevels;
+    if (next.length >= 12) return next;
+    const previous = next[next.length - 1] || { loadKey: "empty", quantity: 0 };
+    return [...next, { ...previous }];
+  });
+  const removeLevel = (index) => setLevels((current) => {
+    const next = (Array.isArray(current) ? current : stackAnalysisInitialLevels).filter((_, itemIndex) => itemIndex !== index);
+    return next.length > 0 ? next : [{ loadKey: "empty", quantity: 0 }];
+  });
+  const moveLevel = (index, direction) => setLevels((current) => {
+    const next = [...(Array.isArray(current) ? current : stackAnalysisInitialLevels)];
+    const target = index + direction;
+    if (target < 0 || target >= next.length) return next;
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  });
+  const fillReferenceStack = () => {
+    if (referenceMaxLevels <= 0) return;
+    setLevels(Array.from({ length: Math.min(12, referenceMaxLevels) }, () => ({ loadKey: referenceLoadKey, quantity: normalizedReferenceQuantity })));
+  };
+
+  const heightTicks = Array.from({ length: Math.floor(roofHeight) + 1 }, (_, index) => index);
+
+  return (
+    <section className="stack-analysis">
+      <div className="stack-analysis-heading">
+        <div><p className="eyebrow">Sideoppriss og lastscreening</p><h2>Stableanalyse</h2><p>Bygg en blandet stabel nivå for nivå og kontroller høyde, containervekt og last over hvert bærenivå.</p></div>
+        <div className={`stack-analysis-status ${analysisPass ? "pass" : "fail"}`}><Layers size={19} />{analysisPass ? "Stabelen passer i screeningen" : "Én eller flere grenser overskrides"}</div>
+      </div>
+
+      <div className="stack-analysis-layout">
+        <aside className="stack-analysis-controls" aria-label="Parametere for stableanalyse">
+          <label className="stack-select-field"><span>Container</span><select value={containerKey} onChange={(event) => setContainerKey(event.target.value)}>{Object.entries(studyContainerOptions).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+          <Slider label="Fri takhøyde" value={roofHeight} min={2} max={15} step={0.1} unit="m" onChange={setRoofHeight} />
+          <Slider label="Klaring mot tak" value={topClearance} min={0} max={1} step={0.05} unit="m" onChange={setTopClearance} />
+          <label className="field"><div className="field-label"><span>Avstand mellom kolli</span><strong>{packageSpacing.toFixed(2)} m</strong></div><input type="range" min="0" max="0.5" step="0.01" value={packageSpacing} onChange={(event) => setPackageSpacing(Number(event.target.value))} /></label>
+
+          <div className="stack-specification">
+            <div><span>Analyseverdier</span><small>Hentet fra valgt container og kan overstyres for scenarioanalyse.</small></div>
+            <label><span>Tare</span><div><input type="number" min="0" step="10" value={specs.tare} onChange={(event) => updateSpec("tare", event.target.value)} /><small>kg</small></div></label>
+            <label><span>Maks nyttelast</span><div><input type="number" min="0" step="10" value={specs.payload} onChange={(event) => updateSpec("payload", event.target.value)} /><small>kg</small></div></label>
+            <label><span>Max gross</span><div><input type="number" min="0" step="10" value={specs.maxGross} onChange={(event) => updateSpec("maxGross", event.target.value)} /><small>kg</small></div></label>
+            <label><span>Stacking test load</span><div><input type="number" min="0" step="10" value={specs.stackingTestLoad} onChange={(event) => updateSpec("stackingTestLoad", event.target.value)} /><small>kg</small></div></label>
+            <label><span>Sertifisert maks nivåer</span><div><input type="number" min="0" max="12" step="1" value={specs.certifiedMax} onChange={(event) => updateSpec("certifiedMax", event.target.value)} /><small>stk</small></div></label>
+          </div>
+
+          <div className="stack-reference-builder">
+            <div><strong>Automatisk maksimum</strong><small>Fyll en ensartet referansestabel innenfor registrerte grenser.</small></div>
+            <label><span>Lasttype</span><select value={referenceLoadKey} onChange={(event) => {
+              const nextKey = event.target.value;
+              setReferenceLoadKey(nextKey);
+              setReferenceQuantity(loadCapacities[nextKey]?.maxCount || 0);
+            }}>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+            <label><span>Antall per container</span><input type="number" min="0" max={referenceCapacity.geometricCount} value={referenceQuantity} onChange={(event) => setReferenceQuantity(Math.max(0, Math.round(Number(event.target.value) || 0)))} /></label>
+            <div className="stack-reference-result"><span>Beregnet maksimum</span><strong>{referenceMaxLevels} nivåer</strong><small>Høyde {geometricHeightLimit} · testlast {Number.isFinite(referenceTestLimit) ? referenceTestLimit : "ikke oppgitt"} · sertifikat {Number.isFinite(certifiedHeightLimit) ? certifiedHeightLimit : "ikke oppgitt"}</small></div>
+            <button type="button" onClick={fillReferenceStack} disabled={referenceMaxLevels <= 0}>Fyll maksimal stabel</button>
+          </div>
+        </aside>
+
+        <div className="stack-analysis-main">
+          <section className="stack-side-card" aria-label="Lager og containerstabel sett fra siden">
+            <div className="stack-side-heading"><div><h3>Lageret sett fra siden</h3><p>{container.shortLabel} · utvendig H {container.height.toFixed(3)} m</p></div><strong>{levelDetails.length} nivåer · {stackHeight.toFixed(3)} m</strong></div>
+            <div className="stack-elevation">
+              {heightTicks.map((tick) => <div className="stack-height-tick" key={tick} style={{ bottom: `${(tick / roofHeight) * 100}%` }}><span>{tick} m</span></div>)}
+              <div className="stack-roof-line"><span>Tak {roofHeight.toFixed(1)} m</span></div>
+              <div className="stack-top-clearance" style={{ height: `${Math.min(100, (topClearance / roofHeight) * 100)}%` }}><span>{topClearance.toFixed(2)} m klaring</span></div>
+              <div className="stack-floor-line"><span>Gulv ±0,00</span></div>
+              <div className="stack-column">
+                {evaluatedLevels.map((level, index) => {
+                  const className = level.load?.shareKey || "empty";
+                  const levelFails = !level.ownPass || level.stackingPass === false || index >= allowedHeightLevels;
+                  return <article className={`stack-level ${className} ${levelFails ? "fails" : ""}`} key={`${level.loadKey}-${index}`} style={{ height: `${(container.height / roofHeight) * 100}%`, bottom: `${(index * container.height / roofHeight) * 100}%` }}>
+                    <div><strong>Nivå {index + 1}{index === 0 ? " · bunn" : ""}</strong><span>{level.load ? `${level.quantity} × ${level.load.shortLabel}` : "Tom container"}</span></div>
+                    <div><strong>{formatNumber(level.grossWeight)} kg</strong><span>over: {formatNumber(level.loadAbove)} kg</span></div>
+                  </article>;
+                })}
+              </div>
+              <div className={`stack-roof-margin ${roofMargin < 0 ? "negative" : ""}`}>{roofMargin >= 0 ? `${roofMargin.toFixed(3)} m fri høyde` : `${Math.abs(roofMargin).toFixed(3)} m over takgrensen`}</div>
+            </div>
+          </section>
+
+          <section className="stack-metrics" aria-label="Nøkkeltall for stabelen">
+            <article><span>Stabelhøyde</span><strong>{stackHeight.toFixed(3)} m</strong><small>Maks {allowedHeightLevels} nivåer ved valgt tak</small></article>
+            <article><span>Samlet vekt</span><strong>{formatNumber(stackWeight)} kg</strong><small>inkludert tare for alle nivåer</small></article>
+            <article className={baseLevel?.stackingPass === false ? "fails" : ""}><span>Last over bunnnivå</span><strong>{formatNumber(baseLevel?.loadAbove || 0)} kg</strong><small>{specs.stackingTestLoad > 0 ? `${formatNumber(baseLevel?.stackingMargin || 0)} kg margin mot testlast` : "stacking-testverdi mangler"}</small></article>
+            <article className={analysisPass ? "passes" : "fails"}><span>Samlet screening</span><strong>{analysisPass ? "Innenfor" : "Overskredet"}</strong><small>{!heightPass ? "Takhøyde" : !loadPass ? "Nyttelast / max gross / geometri" : !structuralPass ? "Stacking test load" : "Alle registrerte grenser"}</small></article>
+          </section>
+
+          <section className="stack-level-editor">
+            <div className="stack-level-editor-heading"><div><h3>Lastanalyse per nivå</h3><p>Rekkefølgen er fra gulvet og opp. «Last over» er vekten som bæres av nivået.</p></div><button type="button" onClick={addLevel} disabled={safeLevels.length >= 12}><Plus size={17} />Legg til nivå</button></div>
+            <div className="stack-level-table stack-level-head"><span>Nivå</span><span>Lasttype</span><span>Antall</span><span>Nyttelast</span><span>Bruttovekt</span><span>Last over / margin</span><span>Kontroll</span><span>Flytt</span></div>
+            {evaluatedLevels.map((level, index) => (
+              <div className={`stack-level-table ${!level.ownPass || level.stackingPass === false || index >= allowedHeightLevels ? "fails" : ""}`} key={`editor-${index}`}>
+                <span><strong>{index + 1}</strong><small>{index === 0 ? "bunn" : index === evaluatedLevels.length - 1 ? "topp" : "mellom"}</small></span>
+                <span><select aria-label={`Lasttype nivå ${index + 1}`} value={level.loadKey} onChange={(event) => changeLevelLoad(index, event.target.value)}><option value="empty">Tom container</option>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select><small>{level.load ? `Maks ${level.capacity.maxCount} stk med valgte grenser` : "Kun tarevekt"}</small></span>
+                <span><input aria-label={`Antall på nivå ${index + 1}`} type="number" min="0" max={level.capacity?.geometricCount || 0} value={level.quantity} disabled={!level.load} onChange={(event) => updateLevel(index, { quantity: Math.max(0, Math.round(Number(event.target.value) || 0)) })} /></span>
+                <span><strong>{formatNumber(level.payloadWeight)} kg</strong><small>{level.payloadPass ? "OK" : "over nyttelast"}</small></span>
+                <span><strong>{formatNumber(level.grossWeight)} kg</strong><small>{level.grossPass ? "OK" : "over max gross"}</small></span>
+                <span><strong>{formatNumber(level.loadAbove)} kg</strong><small>{level.stackingMargin === null ? "testverdi mangler" : `${formatNumber(level.stackingMargin)} kg margin`}</small></span>
+                <span><Badge type={!level.ownPass || level.stackingPass === false || index >= allowedHeightLevels ? "weight" : "none"}>{!level.geometricPass ? "For mange kolli" : !level.payloadPass ? "Nyttelast" : !level.grossPass ? "Max gross" : level.stackingPass === false ? "Testlast" : index >= allowedHeightLevels ? "Takhøyde" : "Innenfor"}</Badge></span>
+                <span className="stack-row-actions"><button type="button" aria-label={`Flytt nivå ${index + 1} ned`} disabled={index === 0} onClick={() => moveLevel(index, -1)}>↓</button><button type="button" aria-label={`Flytt nivå ${index + 1} opp`} disabled={index === evaluatedLevels.length - 1} onClick={() => moveLevel(index, 1)}>↑</button><button type="button" aria-label={`Fjern nivå ${index + 1}`} onClick={() => removeLevel(index)}>×</button></span>
+              </div>
+            ))}
+          </section>
+
+          <div className="stack-analysis-note"><AlertTriangle size={18} /><span>Screeningen bruker oppgitt stacking test load som samlet tillatt last over et nivå. Den erstatter ikke leverandørgodkjenning, bæreevnekontroll, gulvlastberegning eller prosjektering av sikring og løft.</span></div>
+        </div>
       </div>
     </section>
   );
