@@ -13,7 +13,7 @@ export default function Container3DView({ container, load, result, spacing }) {
       <hemisphereLight args={["#b9f5ed", "#15262c", 1.15]} />
       <directionalLight position={[4, 7, 5]} intensity={2.2} castShadow />
       <ContainerMesh container={container} />
-      {result.compatible && <CargoGrid load={load} result={result} spacing={spacing} />}
+      <CargoGrid load={load} result={result} spacing={spacing} />
       {result.compatible && <ClearanceGuides container={container} result={result} />}
       {result.compatible && <OpeningComparison container={container} result={result} />}
       <OrbitControls makeDefault target={[0, container.usableHeight * 0.34, 0]} enableDamping dampingFactor={0.08} minDistance={maxDim * 0.7} maxDistance={maxDim * 4.5} maxPolarAngle={Math.PI * 0.49} />
@@ -186,17 +186,21 @@ function HardTopSideProfile({ intrusion, width, height, length }) {
 
 function CargoGrid({ load, result, spacing }) {
   const meshes = [];
-  for (let row = 0; row < result.rows; row += 1) {
-    for (let col = 0; col < result.cols; col += 1) {
-      const x = -result.usedWidth / 2 + result.itemWidth / 2 + col * (result.itemWidth + spacing);
-      const z = -result.usedLength / 2 + result.itemLength / 2 + row * (result.itemLength + spacing);
-      meshes.push(<CargoMesh key={`${row}-${col}`} load={load} result={result} position={[x, result.usedHeight / 2, z]} />);
+  const visibleRows = Math.max(1, result.rows);
+  const visibleCols = Math.max(1, result.cols);
+  const visibleLength = visibleRows * result.itemLength + Math.max(0, visibleRows - 1) * spacing;
+  const visibleWidth = visibleCols * result.itemWidth + Math.max(0, visibleCols - 1) * spacing;
+  for (let row = 0; row < visibleRows; row += 1) {
+    for (let col = 0; col < visibleCols; col += 1) {
+      const x = -visibleWidth / 2 + result.itemWidth / 2 + col * (result.itemWidth + spacing);
+      const z = -visibleLength / 2 + result.itemLength / 2 + row * (result.itemLength + spacing);
+      meshes.push(<CargoMesh key={`${row}-${col}`} load={load} result={result} position={[x, result.usedHeight / 2, z]} incompatible={!result.compatible} />);
     }
   }
   return <group>{meshes}</group>;
 }
 
-function CargoMesh({ load, result, position }) {
+function CargoMesh({ load, result, position, incompatible = false }) {
   if (load.packKey === "drum") {
     const radius = load.size.width / 2;
     const ringRadius = radius * 1.015;
@@ -204,7 +208,7 @@ function CargoMesh({ load, result, position }) {
       <group position={position}>
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[radius, radius, load.size.height, 32]} />
-          <meshStandardMaterial color="#42c9a2" metalness={0.48} roughness={0.34} />
+          <meshStandardMaterial color={incompatible ? "#d5674f" : "#42c9a2"} transparent={incompatible} opacity={incompatible ? 0.78 : 1} metalness={0.48} roughness={0.34} />
         </mesh>
         {[-load.size.height * 0.47, 0, load.size.height * 0.47].map((y) => (
           <mesh key={y} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
@@ -216,12 +220,12 @@ function CargoMesh({ load, result, position }) {
     );
   }
 
-  const color = load.packKey === "kokille" ? "#e6a33b" : "#4f83bd";
-  const edgeColor = load.packKey === "kokille" ? "#ffd17a" : "#a5d4ff";
+  const color = incompatible ? "#d5674f" : load.packKey === "kokille" ? "#e6a33b" : "#4f83bd";
+  const edgeColor = incompatible ? "#ffb3a3" : load.packKey === "kokille" ? "#ffd17a" : "#a5d4ff";
   return (
     <mesh position={position} castShadow receiveShadow>
       <boxGeometry args={[result.itemWidth, result.itemHeight, result.itemLength]} />
-      <meshStandardMaterial color={color} metalness={0.34} roughness={0.46} />
+      <meshStandardMaterial color={color} transparent={incompatible} opacity={incompatible ? 0.78 : 1} metalness={0.34} roughness={0.46} />
       <Edges scale={1.002} color={edgeColor} />
     </mesh>
   );

@@ -1033,8 +1033,11 @@ function evaluatePackingOrientation(container, load, orientation, spacing) {
 }
 
 function getPackingStudy(container, load, orientationMode = "auto", spacing = 0.05) {
-  const candidates = (orientationMode === "auto" ? ["straight", "rotated"] : [orientationMode])
+  const orientationResults = ["straight", "rotated"]
     .map((orientation) => evaluatePackingOrientation(container, load, orientation, spacing));
+  const candidates = orientationMode === "auto"
+    ? orientationResults
+    : orientationResults.filter((candidate) => candidate.orientation === orientationMode);
   const selected = candidates.reduce((best, candidate) => {
     if (!best || candidate.count > best.count) return candidate;
     if (candidate.count < best.count) return best;
@@ -1046,6 +1049,7 @@ function getPackingStudy(container, load, orientationMode = "auto", spacing = 0.
   const widthFails = selected.itemWidth > container.usableWidth;
   const failures = [heightFails && "høyde", lengthFails && "lengde", widthFails && "bredde"].filter(Boolean);
   const compatible = selected.count > 0;
+  const alternativeOrientation = orientationResults.find((candidate) => candidate.orientation !== selected.orientation && candidate.count > 0) || null;
   const floorArea = container.usableLength * container.usableWidth;
   const volume = floorArea * container.usableHeight;
   const loadFloorArea = selected.count * selected.itemLength * selected.itemWidth;
@@ -1076,7 +1080,10 @@ function getPackingStudy(container, load, orientationMode = "auto", spacing = 0.
     floorAreaUtilization: compatible ? (loadFloorArea / floorArea) * 100 : 0,
     volumeUtilization: compatible ? (loadVolume / volume) * 100 : 0,
     criticalClearance: compatible ? Math.min(selected.clearanceLength, selected.clearanceWidth, selected.clearanceHeight) : Math.min(selected.clearanceLength, selected.clearanceWidth, selected.clearanceHeight),
-    reason: compatible ? "Lasten passer innenfor containerens innvendige mål." : `Passer ikke på grunn av ${failures.length ? failures.join(" og ") : "tilgjengelig pakkeflate"}.`,
+    reason: compatible
+      ? "Lasten passer innenfor containerens innvendige mål."
+      : `Passer ikke på grunn av ${failures.length ? failures.join(" og ") : "tilgjengelig pakkeflate"} i ${selected.orientation === "rotated" ? "90° rotert retning" : "standardretning"}.${alternativeOrientation ? ` ${alternativeOrientation.orientation === "rotated" ? "90° rotert" : "Standardretning"} passer med ${Math.round(alternativeOrientation.clearanceLength * 1000)} mm lengdeklaring, ${Math.round(alternativeOrientation.clearanceWidth * 1000)} mm breddeklaring og ${Math.round(alternativeOrientation.clearanceHeight * 1000)} mm høydeklaring.` : ""}`,
+    alternativeOrientation,
     frontAccess,
     topAccess,
     verifiedAccess,
@@ -1281,7 +1288,7 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
           </div>}
           <label className="study-field"><span>Lasttype</span><select value={studyLoadKey} onChange={(event) => setStudyLoadKey(event.target.value)}>{Object.entries(loadTypes).map(([key, item]) => <option key={key} value={key}>{item.label} · {item.dimensions}</option>)}</select></label>
           <div className="study-load-dimensions"><span>Valgt lastmål</span><strong>L {load.size.length.toFixed(3)} × B {load.size.width.toFixed(3)} × H {load.size.height.toFixed(3)} m</strong><small>{load.dimensions}</small></div>
-          <div className="study-field"><span>Orientering</span><div className="study-segments">{Object.entries(studyOrientationOptions).map(([key, item]) => <button type="button" key={key} className={studyOrientation === key ? "active" : ""} onClick={() => setStudyOrientation(key)}>{item.label}</button>)}</div></div>
+          <div className="study-field"><span>Orientering</span><div className="study-segments">{Object.entries(studyOrientationOptions).map(([key, item]) => <button type="button" key={key} className={studyOrientation === key ? "active" : ""} onClick={() => setStudyOrientation(key)}>{item.label}</button>)}</div>{!result.compatible && result.alternativeOrientation && <button type="button" className="study-orientation-suggestion" onClick={() => setStudyOrientation(result.alternativeOrientation.orientation)}><RotateCw size={16} />{result.alternativeOrientation.orientation === "rotated" ? "90° rotert" : "Standardretning"} passer – bruk denne</button>}</div>
           <label className="study-field study-slider"><span><span>Avstand mellom kolli</span><strong>{studySpacing.toFixed(2)} m</strong></span><input type="range" min="0" max="0.5" step="0.01" value={studySpacing} onChange={(event) => setStudySpacing(Number(event.target.value))} /></label>
           <div className="study-dimensions">
             <span>Utvendig container</span><strong>L {container.length.toFixed(3)} × B {container.width.toFixed(3)} × H {container.height.toFixed(3)} m</strong>

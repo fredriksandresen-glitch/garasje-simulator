@@ -204,10 +204,11 @@ input[type="range"] { width: 100%; accent-color: #286b52; }
 .study-webgl { position: relative; height: 395px; overflow: hidden; border: 1px solid rgba(93,196,190,.18); border-radius: 8px; background: radial-gradient(circle at 48% 38%, rgba(36,90,96,.28), transparent 48%), linear-gradient(155deg, #0c171b, #081014); }
 .study-webgl canvas { display: block; width: 100% !important; height: 100% !important; cursor: grab; touch-action: none; }
 .study-webgl canvas:active { cursor: grabbing; }
-.study-webgl.incompatible canvas { opacity: .62; filter: saturate(.65); }
+.study-webgl.incompatible canvas { opacity: .94; filter: saturate(.86); }
 .study-view-hint { position: absolute; right: 11px; bottom: 9px; z-index: 2; padding: 5px 8px; border-radius: 5px; color: #83acaf; background: rgba(5,13,16,.7); font-size: .68rem; font-weight: 750; pointer-events: none; }
-.study-no-fit { position: absolute; z-index: 5; top: 50%; left: 50%; display: grid; place-content: center; justify-items: center; gap: 5px; width: min(78%, 390px); padding: 20px; color: #ffae9d; text-align: center; border: 1px solid #a64e40; border-radius: 8px; background: rgba(45,18,17,.9); box-shadow: 0 12px 35px rgba(0,0,0,.34); transform: translate(-50%, -50%); pointer-events: none; }
-.study-no-fit span { max-width: 280px; font-size: .78rem; }
+.study-no-fit { position: absolute; z-index: 5; top: 12px; right: 12px; display: grid; justify-items: start; gap: 3px; width: min(62%, 360px); padding: 10px 12px; color: #ffb7aa; text-align: left; border: 1px solid #a64e40; border-radius: 8px; background: rgba(45,18,17,.82); box-shadow: 0 8px 24px rgba(0,0,0,.28); pointer-events: none; }
+.study-no-fit span { max-width: 330px; font-size: .74rem; line-height: 1.35; }
+.study-orientation-suggestion { width: 100%; margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 11px; color: #0a2c27; border: 1px solid #64dfc6; border-radius: 6px; background: #72e1c8; font-weight: 900; }
 .study-webgl-fallback { display: grid; place-items: center; height: 100%; padding: 30px; color: #ffb19e; text-align: center; font-weight: 800; }
 .study-clearance-overlay { position: absolute; top: 9px; right: 9px; z-index: 4; width: 126px; display: grid; gap: 2px; padding: 7px 8px; border: 1px solid rgba(122,163,158,.48); border-radius: 6px; color: #b9cdca; background: rgba(7,17,20,.82); box-shadow: 0 6px 18px rgba(0,0,0,.18); font-size: .64rem; line-height: 1.25; pointer-events: none; }
 .study-clearance-overlay strong { margin-top: 3px; color: #79aaa5; font-size: .58rem; text-transform: uppercase; }
