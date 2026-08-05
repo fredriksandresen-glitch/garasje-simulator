@@ -1204,6 +1204,13 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
   const [studyOrientation, setStudyOrientation] = usePersistentState("studyOrientation", "auto");
   const [studySpacing, setStudySpacing] = usePersistentState("studySpacing", 0.05);
   const [reportSettings, setReportSettings] = usePersistentState("containerReportSettings", containerReportDefaults);
+  const [reportStackContainerKey] = usePersistentState("stackAnalysisContainer", "hardtop10hhbk2");
+  const [reportStackRoofHeight] = usePersistentState("stackAnalysisRoofHeight", 6);
+  const [reportStackTopClearance] = usePersistentState("stackAnalysisTopClearance", 0.2);
+  const [reportStackPackageSpacing] = usePersistentState("stackAnalysisPackageSpacing", 0.05);
+  const [reportStackLoadWeights] = usePersistentState("stackAnalysisLoadWeights", stackAnalysisDefaultWeights);
+  const [reportStackLevels] = usePersistentState("stackAnalysisLevels", stackAnalysisInitialLevels);
+  const [reportStackSpecs] = usePersistentState("stackAnalysisSpecs", getStackSpecificationDefaults("hardtop10hhbk2"));
   const [reportState, setReportState] = useState({ generating: false, message: "", error: false, downloadUrl: null, fileName: "" });
   const studyVisualRef = useRef(null);
   const reportPreviewRefs = useRef({});
@@ -1237,6 +1244,15 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
         spacing: studySpacing,
         settings: effectiveReportSettings,
         warehouseAnalysis: buildArchitecturalWarehouseReport(container, effectiveReportSettings),
+        stackAnalysis: {
+          containerKey: reportStackContainerKey,
+          roofHeight: reportStackRoofHeight,
+          topClearance: reportStackTopClearance,
+          packageSpacing: reportStackPackageSpacing,
+          loadWeights: reportStackLoadWeights,
+          levels: reportStackLevels,
+          specs: reportStackSpecs
+        },
         visualElement: studyVisualRef.current,
         previewElements: reportPreviewRows.map((row) => ({
           key: row.key,

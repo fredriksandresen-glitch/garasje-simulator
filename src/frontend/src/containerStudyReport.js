@@ -682,41 +682,60 @@ function addStackingPage(doc, data) {
 }
 
 function buildMixedStackScenario(data) {
-  const tare = Number.isFinite(data.container.tare) ? data.container.tare : 0;
-  const preferredLoads = ["kokille", "steel2", "drum210"];
-  const levels = preferredLoads.map((key, index) => {
-    const row = data.loadRows.find((item) => item.key === key) || data.loadRows[index];
-    const quantity = Math.max(0, row?.practicalCount || 0);
-    const payloadWeight = quantity * (row?.load?.defaultWeight || 0);
+  const stackAnalysis = data.stackAnalysis || {};
+  const useStoredSpecs = !stackAnalysis.containerKey || stackAnalysis.containerKey === data.containerKey;
+  const specs = useStoredSpecs ? stackAnalysis.specs || {} : {};
+  const tare = Number.isFinite(Number(specs.tare)) ? Number(specs.tare) : Number.isFinite(data.container.tare) ? data.container.tare : 0;
+  const fallbackLevels = [
+    { loadKey: "drum210", quantity: data.loadRows.find((item) => item.key === "drum210")?.practicalCount || 0 },
+    { loadKey: "steel2", quantity: data.loadRows.find((item) => item.key === "steel2")?.practicalCount || 0 },
+    { loadKey: "kokille", quantity: data.loadRows.find((item) => item.key === "kokille")?.practicalCount || 0 },
+    { loadKey: "steel3", quantity: Math.min(1, data.loadRows.find((item) => item.key === "steel3")?.practicalCount || 0) },
+    { loadKey: "steel1", quantity: Math.min(1, data.loadRows.find((item) => item.key === "steel1")?.practicalCount || 0) }
+  ];
+  const storedLevels = Array.isArray(stackAnalysis.levels) ? stackAnalysis.levels : [];
+  const sourceLevels = storedLevels.filter((level) => level?.loadKey !== "empty" && Math.max(0, Math.round(Number(level?.quantity) || 0)) > 0);
+  const levelDefinitions = sourceLevels.length > 0 ? sourceLevels : fallbackLevels.filter((level) => level.quantity > 0);
+  const levels = levelDefinitions.map((definition, index) => {
+    const row = data.loadRows.find((item) => item.key === definition.loadKey) || data.loadRows[index];
+    const quantity = Math.max(0, Math.round(Number(definition.quantity) || 0));
+    const storedWeight = Number(stackAnalysis.loadWeights?.[definition.loadKey]);
+    const unitWeight = Number.isFinite(storedWeight) && storedWeight > 0 ? storedWeight : row?.load?.defaultWeight || 0;
+    const payloadWeight = quantity * unitWeight;
     return {
       key: row?.key || `level-${index + 1}`,
       label: row?.load?.shortLabel || row?.load?.label || "Last",
+      row,
       quantity,
+      unitWeight,
       payloadWeight,
       grossWeight: tare + payloadWeight,
       color: row?.load?.shareKey === "drum" ? colors.amber : row?.load?.shareKey === "kokille" ? [105, 168, 107] : [63, 131, 184]
     };
   });
-  levels.push({ key: "empty", label: "Tom container", quantity: 0, payloadWeight: 0, grossWeight: tare, color: [221, 230, 226] });
 
   for (let index = 0; index < levels.length; index += 1) {
     levels[index].loadAbove = levels.slice(index + 1).reduce((sum, level) => sum + level.grossWeight, 0);
   }
 
   const stackHeight = levels.length * data.container.height;
-  const requiredRoofHeight = stackHeight + data.settings.topClearance;
-  const stackingTestLoad = getStackingTestLoad(data.container);
-  const certifiedLimit = getCertifiedStackLimit(data.container);
-  const maxGross = Number.isFinite(data.container.maxGross) ? data.container.maxGross : Infinity;
-  const maxPayload = Number.isFinite(data.container.payload) ? data.container.payload : Infinity;
+  const roofHeight = clampNumber(stackAnalysis.roofHeight, data.settings.roofHeight, 1);
+  const topClearance = clampNumber(stackAnalysis.topClearance, data.settings.topClearance);
+  const packageSpacing = clampNumber(stackAnalysis.packageSpacing, data.spacing || 0.05);
+  const requiredRoofHeight = stackHeight + topClearance;
+  const stackingTestLoad = Number.isFinite(Number(specs.stackingTestLoad)) ? Number(specs.stackingTestLoad) : getStackingTestLoad(data.container);
+  const certifiedLimit = Number.isFinite(Number(specs.certifiedMax)) && Number(specs.certifiedMax) > 0 ? Number(specs.certifiedMax) : getCertifiedStackLimit(data.container);
+  const maxGross = Number.isFinite(Number(specs.maxGross)) && Number(specs.maxGross) > 0 ? Number(specs.maxGross) : Number.isFinite(data.container.maxGross) ? data.container.maxGross : Infinity;
+  const maxPayload = Number.isFinite(Number(specs.payload)) && Number(specs.payload) > 0 ? Number(specs.payload) : Number.isFinite(data.container.payload) ? data.container.payload : Infinity;
   levels.forEach((level) => {
     level.stackingMargin = Number.isFinite(stackingTestLoad) ? stackingTestLoad - level.loadAbove : null;
-    level.pass = level.payloadWeight <= maxPayload && level.grossWeight <= maxGross && (!Number.isFinite(stackingTestLoad) || level.loadAbove <= stackingTestLoad);
+    const geometricCount = level.row?.geometricCount;
+    level.pass = (!Number.isFinite(geometricCount) || level.quantity <= geometricCount) && level.payloadWeight <= maxPayload && level.grossWeight <= maxGross && (!Number.isFinite(stackingTestLoad) || level.loadAbove <= stackingTestLoad);
   });
-  const roofMargin = data.settings.roofHeight - requiredRoofHeight;
+  const roofMargin = roofHeight - requiredRoofHeight;
   const totalWeight = levels.reduce((sum, level) => sum + level.grossWeight, 0);
   const pass = roofMargin >= 0 && levels.length <= certifiedLimit && levels.every((level) => level.pass);
-  return { levels, stackHeight, requiredRoofHeight, roofMargin, totalWeight, stackingTestLoad, pass };
+  return { levels, stackHeight, requiredRoofHeight, roofHeight, topClearance, packageSpacing, roofMargin, totalWeight, stackingTestLoad, maxGross, maxPayload, certifiedLimit, pass };
 }
 
 function getAverageStackWeightSeries(container, topClearance) {
@@ -742,101 +761,194 @@ function getAverageStackWeightSeries(container, topClearance) {
 }
 
 function drawMixedStackElevation(doc, x, y, width, height, data, scenario) {
-  const displayHeight = Math.max(data.settings.roofHeight, scenario.requiredRoofHeight, 1);
-  const scale = (height - 8) / displayHeight;
-  const groundY = y + height - 3;
-  const roofY = groundY - data.settings.roofHeight * scale;
+  const displayHeight = Math.max(scenario.roofHeight, scenario.requiredRoofHeight, 1);
+  const scale = (height - 10) / displayHeight;
+  const groundY = y + height - 4;
+  const roofY = groundY - scenario.roofHeight * scale;
   const containerHeight = data.container.height * scale;
-  const containerWidth = Math.min(width - 24, data.container.length * scale);
+  const containerWidth = Math.min(width - 34, data.container.length * scale);
   const containerX = x + (width - containerWidth) / 2;
 
   doc.setDrawColor(...colors.line);
   doc.setFillColor(...colors.paper);
   doc.roundedRect(x, y, width, height, 2, 2, "FD");
+  doc.setLineWidth(0.2);
+  doc.setLineDashPattern([1, 1], 0);
+  for (let tick = 0; tick <= Math.floor(scenario.roofHeight); tick += 1) {
+    const tickY = groundY - tick * scale;
+    doc.setDrawColor(196, 207, 203);
+    doc.line(x + 8, tickY, x + width - 8, tickY);
+    setText(doc, 4.8, colors.muted, tick === 0 ? "bold" : "normal");
+    doc.text(`${tick} m`, x + 3, tickY + 1.5);
+  }
+  doc.setLineDashPattern([], 0);
+
+  if (scenario.topClearance > 0) {
+    const clearanceBottom = roofY + scenario.topClearance * scale;
+    doc.setFillColor(249, 241, 216);
+    doc.setDrawColor(...colors.amber);
+    doc.rect(x + 8, roofY, width - 16, Math.max(1.8, clearanceBottom - roofY), "FD");
+    setText(doc, 4.8, [132, 91, 29], "bold");
+    doc.text(`${formatNumber(scenario.topClearance, 3)} m toppklaring`, x + 10, roofY + 4.5);
+  }
+
   doc.setDrawColor(...colors.ink);
   doc.setLineWidth(0.7);
-  doc.line(x + 5, roofY, x + width - 5, roofY);
-  doc.line(x + 5, groundY, x + width - 5, groundY);
-  setText(doc, 5.8, colors.ink, "bold");
-  doc.text(`Tak ${formatMeters(data.settings.roofHeight, 2)}`, x + 6, roofY - 2);
-  doc.text("Gulv +/-0,00", x + 6, groundY + 4);
+  doc.line(x + 8, roofY, x + width - 8, roofY);
+  doc.line(x + 8, groundY, x + width - 8, groundY);
+  doc.setFillColor(...colors.ink);
+  doc.roundedRect(x + width - 18, roofY + 1, 10, 5, 1, 1, "F");
+  setText(doc, 4.5, colors.white, "bold");
+  doc.text("Tak", x + width - 13, roofY + 4.5, { align: "center" });
+  doc.roundedRect(x + width - 27, groundY - 6, 19, 5, 1, 1, "F");
+  doc.text("Gulv +/-0,00", x + width - 17.5, groundY - 2.5, { align: "center" });
 
   scenario.levels.forEach((level, index) => {
     const levelY = groundY - (index + 1) * containerHeight;
-    doc.setFillColor(...level.color);
+    const borderColor = level.pass ? level.color : colors.red;
+    doc.setFillColor(237, 244, 241);
     doc.setDrawColor(...(level.pass ? colors.green : colors.red));
-    doc.roundedRect(containerX, levelY, containerWidth, containerHeight, 1, 1, "FD");
-    setText(doc, 6.2, colors.ink, "bold");
-    doc.text(`Nivå ${index + 1}${index === 0 ? " - bunn" : ""}`, containerX + 3, levelY + 6);
-    setText(doc, 5.4, colors.ink);
-    doc.text(level.quantity > 0 ? `${level.quantity} x ${level.label}` : level.label, containerX + 3, levelY + 11);
-    doc.text(`${formatNumber(level.grossWeight)} kg`, containerX + containerWidth - 3, levelY + 6, { align: "right" });
-    doc.text(`over ${formatNumber(level.loadAbove)} kg`, containerX + containerWidth - 3, levelY + 11, { align: "right" });
+    doc.setLineWidth(0.45);
+    doc.rect(containerX, levelY, containerWidth, containerHeight, "FD");
+    doc.setDrawColor(...borderColor);
+    doc.setLineWidth(0.8);
+    doc.rect(containerX, levelY, containerWidth, containerHeight);
+    doc.setLineWidth(0.18);
+    for (let rib = 1; rib < 7; rib += 1) {
+      const ribX = containerX + (containerWidth * rib) / 7;
+      doc.setDrawColor(184, 203, 197);
+      doc.line(ribX, levelY + 1, ribX, levelY + containerHeight - 1);
+    }
+
+    const row = level.row;
+    const result = row?.result;
+    const load = row?.load;
+    if (result?.compatible && load && level.quantity > 0) {
+      const rows = Math.max(1, result.rows);
+      const cols = Math.max(1, result.cols);
+      const slotsPerLayer = rows * cols;
+      const verticalLayers = Math.max(1, row.verticalLayers || 1);
+      const floorOffset = Math.max(0, (data.container.height - data.container.usableHeight) / 2);
+      for (let layer = 0; layer < verticalLayers; layer += 1) {
+        const layerQuantity = Math.min(slotsPerLayer, Math.max(0, level.quantity - layer * slotsPerLayer));
+        if (layerQuantity <= 0) break;
+        const occupiedRows = Math.min(rows, Math.ceil(layerQuantity / cols));
+        const usedLength = occupiedRows * result.itemLength + Math.max(0, occupiedRows - 1) * scenario.packageSpacing;
+        const startX = containerX + (containerWidth - usedLength * scale) / 2;
+        for (let cargoIndex = 0; cargoIndex < occupiedRows; cargoIndex += 1) {
+          const depthCount = Math.min(cols, Math.max(0, layerQuantity - cargoIndex * cols));
+          const cargoX = startX + cargoIndex * (result.itemLength + scenario.packageSpacing) * scale;
+          const cargoWidth = result.itemLength * scale;
+          const cargoHeight = load.size.height * scale;
+          const cargoBottom = levelY + containerHeight - (floorOffset + layer * (load.size.height + scenario.packageSpacing)) * scale;
+          const cargoY = cargoBottom - cargoHeight;
+          doc.setFillColor(...level.color);
+          doc.setDrawColor(...borderColor);
+          if (load.shareKey === "drum") {
+            doc.roundedRect(cargoX, cargoY, cargoWidth, cargoHeight, 1, 1, "FD");
+            doc.setLineWidth(0.25);
+            doc.line(cargoX, cargoY + cargoHeight * 0.18, cargoX + cargoWidth, cargoY + cargoHeight * 0.18);
+            doc.line(cargoX, cargoY + cargoHeight * 0.52, cargoX + cargoWidth, cargoY + cargoHeight * 0.52);
+            doc.line(cargoX, cargoY + cargoHeight * 0.84, cargoX + cargoWidth, cargoY + cargoHeight * 0.84);
+          } else {
+            doc.roundedRect(cargoX, cargoY, cargoWidth, cargoHeight, 0.6, 0.6, "FD");
+          }
+          if (depthCount > 1) {
+            setText(doc, 4, colors.white, "bold");
+            doc.text(`x${depthCount}`, cargoX + cargoWidth / 2, cargoY + cargoHeight / 2 + 1.2, { align: "center" });
+          }
+        }
+      }
+    }
+
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(...colors.line);
+    doc.roundedRect(containerX + 2, levelY + 2, Math.min(38, containerWidth * 0.58), 11, 1, 1, "FD");
+    setText(doc, 5.6, colors.ink, "bold");
+    doc.text(`Nivå ${index + 1}${index === 0 ? " - bunn" : ""}`, containerX + 4, levelY + 6.5);
+    setText(doc, 4.7, colors.ink);
+    doc.text(`${level.quantity} x ${level.label}`, containerX + 4, levelY + 10.5);
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(containerX + containerWidth - Math.min(25, containerWidth * 0.35) - 2, levelY + 2, Math.min(25, containerWidth * 0.35), 11, 1, 1, "F");
+    setText(doc, 4.7, colors.ink, "bold");
+    doc.text(`${formatNumber(level.grossWeight)} kg`, containerX + containerWidth - 4, levelY + 6.5, { align: "right" });
+    doc.text(`over ${formatNumber(level.loadAbove)}`, containerX + containerWidth - 4, levelY + 10.5, { align: "right" });
   });
 
-  if (data.settings.topClearance > 0) {
-    const clearanceTop = groundY - scenario.stackHeight * scale - data.settings.topClearance * scale;
-    doc.setFillColor(248, 235, 197);
-    doc.setDrawColor(...colors.amber);
-    doc.rect(containerX, clearanceTop, containerWidth, data.settings.topClearance * scale, "FD");
-    setText(doc, 5.2, colors.ink, "bold");
-    doc.text(`${formatNumber(data.settings.topClearance, 2)} m klaring`, containerX + containerWidth / 2, clearanceTop + Math.max(3, data.settings.topClearance * scale / 2 + 1), { align: "center" });
-  }
-
   doc.setDrawColor(...colors.muted);
-  doc.line(x + width - 8, groundY, x + width - 8, groundY - scenario.stackHeight * scale);
-  setText(doc, 5.5, colors.muted, "bold");
-  doc.text(`Stabel ${formatMeters(scenario.stackHeight, 3)}`, x + width - 10, groundY - scenario.stackHeight * scale / 2, { angle: 90, align: "center" });
+  doc.setLineWidth(0.35);
+  doc.line(containerX + containerWidth + 8, groundY, containerX + containerWidth + 8, groundY - scenario.stackHeight * scale);
+  doc.line(containerX + containerWidth + 6, groundY, containerX + containerWidth + 10, groundY);
+  doc.line(containerX + containerWidth + 6, groundY - scenario.stackHeight * scale, containerX + containerWidth + 10, groundY - scenario.stackHeight * scale);
+  setText(doc, 5.2, colors.muted, "bold");
+  doc.text(`Stabel ${formatMeters(scenario.stackHeight, 3)}`, containerX + containerWidth + 11, groundY - scenario.stackHeight * scale / 2, { angle: 90, align: "center" });
+  doc.line(containerX - 8, groundY, containerX - 8, groundY - containerHeight);
+  doc.line(containerX - 10, groundY, containerX - 6, groundY);
+  doc.line(containerX - 10, groundY - containerHeight, containerX - 6, groundY - containerHeight);
+  doc.text(`H ${formatMeters(data.container.height, 3)}`, containerX - 11, groundY - containerHeight / 2, { angle: 90, align: "center" });
+  doc.line(containerX, groundY + 4, containerX + containerWidth, groundY + 4);
+  doc.line(containerX, groundY + 2, containerX, groundY + 6);
+  doc.line(containerX + containerWidth, groundY + 2, containerX + containerWidth, groundY + 6);
+  doc.text(`L ${formatMeters(data.container.length, 3)}`, containerX + containerWidth / 2, groundY + 8, { align: "center" });
+
+  const freeHeight = scenario.roofHeight - scenario.topClearance - scenario.stackHeight;
+  doc.setFillColor(...(freeHeight >= 0 ? [228, 244, 236] : [250, 231, 226]));
+  doc.setDrawColor(...(freeHeight >= 0 ? colors.green : colors.red));
+  doc.roundedRect(x + width - 43, roofY + 8, 34, 8, 1.5, 1.5, "FD");
+  setText(doc, 5.1, freeHeight >= 0 ? colors.green : colors.red, "bold");
+  doc.text(freeHeight >= 0 ? `${formatNumber(freeHeight, 3)} m fri høyde` : `${formatNumber(Math.abs(freeHeight), 3)} m for høyt`, x + width - 26, roofY + 13, { align: "center" });
 }
 
 function addMixedStackAnalysisPage(doc, data) {
   doc.addPage();
   const scenario = buildMixedStackScenario(data);
-  addPageTitle(doc, "Blandet stableanalyse", "Sideoppriss, takhøyde, klaring, last per nivå og stacking-testmargin");
-  drawMixedStackElevation(doc, 14, 36, 94, 151, data, scenario);
+  addPageTitle(doc, "Stableanalyse - lagret scenario", "Samme nivårekkefølge, takhøyde, klaring og lastdata som i Stableanalyse-fanen");
+  drawMixedStackElevation(doc, 14, 36, 119, 151, data, scenario);
 
-  drawMetricCard(doc, 116, 36, 52, "Valgt takhøyde", formatMeters(data.settings.roofHeight, 2), `krav inkl. klaring ${formatMeters(scenario.requiredRoofHeight, 2)}`);
-  drawMetricCard(doc, 173, 36, 52, "Stabelhøyde", formatMeters(scenario.stackHeight, 3), `${scenario.levels.length} containere i høyden`);
-  drawMetricCard(doc, 230, 36, 53, "Samlet vekt", `${formatNumber(scenario.totalWeight)} kg`, "tare og last i alle nivåer");
-  drawMetricCard(doc, 116, 66, 52, "Toppklaring", formatMeters(data.settings.topClearance, 3), scenario.roofMargin >= 0 ? `${formatMillimeters(scenario.roofMargin)} ekstra fri høyde` : `${formatMillimeters(scenario.roofMargin)} konflikt`);
-  drawMetricCard(doc, 173, 66, 52, "Last over bunn", `${formatNumber(scenario.levels[0]?.loadAbove || 0)} kg`, "summert bruttovekt over nivå 1");
-  drawMetricCard(doc, 230, 66, 53, "Testlastmargin", Number.isFinite(scenario.levels[0]?.stackingMargin) ? `${formatNumber(scenario.levels[0].stackingMargin)} kg` : "Ikke oppgitt", Number.isFinite(scenario.stackingTestLoad) ? `mot ${formatNumber(scenario.stackingTestLoad)} kg` : "testverdi mangler");
+  drawMetricCard(doc, 141, 36, 67, "Valgt takhøyde", formatMeters(scenario.roofHeight, 2), `krav inkl. klaring ${formatMeters(scenario.requiredRoofHeight, 2)}`);
+  drawMetricCard(doc, 216, 36, 67, "Stabelhøyde", formatMeters(scenario.stackHeight, 3), `${scenario.levels.length} lastede containere i høyden`);
+  drawMetricCard(doc, 141, 66, 67, "Toppklaring", formatMeters(scenario.topClearance, 3), scenario.roofMargin >= 0 ? `${formatMillimeters(scenario.roofMargin)} ekstra fri høyde` : `${formatMillimeters(scenario.roofMargin)} konflikt`);
+  drawMetricCard(doc, 216, 66, 67, "Samlet vekt", `${formatNumber(scenario.totalWeight)} kg`, "tare og last i alle nivåer");
+  drawMetricCard(doc, 141, 96, 67, "Last over bunn", `${formatNumber(scenario.levels[0]?.loadAbove || 0)} kg`, "summert bruttovekt over nivå 1");
+  drawMetricCard(doc, 216, 96, 67, "Testlastmargin", Number.isFinite(scenario.levels[0]?.stackingMargin) ? `${formatNumber(scenario.levels[0].stackingMargin)} kg` : "Ikke oppgitt", Number.isFinite(scenario.stackingTestLoad) ? `mot ${formatNumber(scenario.stackingTestLoad)} kg` : "testverdi mangler");
 
   doc.setFillColor(...(scenario.pass ? [228, 244, 236] : [250, 231, 226]));
   doc.setDrawColor(...(scenario.pass ? colors.green : colors.red));
-  doc.roundedRect(116, 96, 167, 11, 2, 2, "FD");
+  doc.roundedRect(141, 126, 142, 10, 2, 2, "FD");
   setText(doc, 7.2, scenario.pass ? colors.green : colors.red, "bold");
-  doc.text(scenario.pass ? "Scenarioet er innenfor registrerte geometri- og vektgrenser" : "Scenarioet overskrider én eller flere registrerte grenser", 120, 103);
+  doc.text(scenario.pass ? "Lagret scenario er innenfor registrerte grenser" : "Lagret scenario overskrider én eller flere grenser", 145, 132.5);
 
-  const headers = [["Nivå", 118], ["Last", 136], ["Nyttelast", 184], ["Bruttovekt", 214], ["Last over", 246], ["Margin", 276]];
+  const headers = [["Nivå", 143], ["Last", 158], ["Nyttelast", 208], ["Brutto", 234], ["Over", 258], ["Margin", 280]];
   doc.setFillColor(...colors.dark);
-  doc.roundedRect(116, 112, 167, 10, 1.5, 1.5, "F");
+  doc.roundedRect(141, 140, 142, 8, 1.5, 1.5, "F");
   headers.forEach(([label, columnX]) => {
-    setText(doc, 6.1, colors.white, "bold");
-    doc.text(label, columnX, 118.5, { align: columnX > 180 ? "right" : "left" });
+    setText(doc, 5.5, colors.white, "bold");
+    doc.text(label, columnX, 145.3, { align: columnX > 180 ? "right" : "left" });
   });
+  const rowHeight = Math.min(7.2, 34 / Math.max(1, scenario.levels.length));
   scenario.levels.forEach((level, index) => {
-    const rowY = 123 + index * 13;
+    const rowY = 149 + index * rowHeight;
     doc.setFillColor(...(index % 2 === 0 ? [247, 250, 249] : [239, 245, 243]));
     doc.setDrawColor(...colors.line);
-    doc.rect(116, rowY, 167, 11.5, "FD");
-    setText(doc, 6.2, colors.ink, index === 0 ? "bold" : "normal");
-    doc.text(String(index + 1), 121, rowY + 7.2);
-    doc.text(level.quantity > 0 ? `${level.quantity} x ${level.label}` : level.label, 136, rowY + 7.2);
-    doc.text(`${formatNumber(level.payloadWeight)} kg`, 184, rowY + 7.2, { align: "right" });
-    doc.text(`${formatNumber(level.grossWeight)} kg`, 214, rowY + 7.2, { align: "right" });
-    doc.text(`${formatNumber(level.loadAbove)} kg`, 246, rowY + 7.2, { align: "right" });
+    doc.rect(141, rowY, 142, Math.max(4.2, rowHeight - 0.5), "FD");
+    const textY = rowY + Math.max(3.2, rowHeight * 0.66);
+    setText(doc, Math.max(4.3, Math.min(5.6, rowHeight * 0.78)), colors.ink, index === 0 ? "bold" : "normal");
+    doc.text(String(index + 1), 146, textY);
+    doc.text(`${level.quantity} x ${level.label}`, 158, textY);
+    doc.text(`${formatNumber(level.payloadWeight)} kg`, 208, textY, { align: "right" });
+    doc.text(`${formatNumber(level.grossWeight)} kg`, 234, textY, { align: "right" });
+    doc.text(`${formatNumber(level.loadAbove)} kg`, 258, textY, { align: "right" });
     doc.setTextColor(...(level.stackingMargin === null || level.stackingMargin >= 0 ? colors.green : colors.red));
-    doc.text(level.stackingMargin === null ? "-" : `${formatNumber(level.stackingMargin)} kg`, 280, rowY + 7.2, { align: "right" });
+    doc.text(level.stackingMargin === null ? "-" : `${formatNumber(level.stackingMargin)} kg`, 280, textY, { align: "right" });
   });
 
   setText(doc, 5.8, colors.muted);
-  doc.text(doc.splitTextToSize("Blandet eksempel: kokiller i bunncontainer, stålkasse V2 i nivå 2, 210L-tønner i nivå 3 og tom toppcontainer. Last over et nivå er summen av bruttovektene i alle containere over. Rekkefølge og lastfordeling er et screeningsscenario, ikke en operativ stablegodkjenning.", 165), 116, 180);
+  doc.text(doc.splitTextToSize("Nivårekkefølge, antall, kollivekter, takhøyde og toppklaring er hentet fra den sist lagrede Stableanalyse-fanen. Tomme nivåer tas ikke med. Last over et nivå er summen av bruttovektene i alle lastede containere over. Screeningen er ikke en operativ stablegodkjenning.", 140), 141, 187);
 }
 
 function addStackWeightEnvelopePage(doc, data) {
   doc.addPage();
-  const series = getAverageStackWeightSeries(data.container, data.settings.topClearance);
+  const series = getAverageStackWeightSeries(data.container, data.stackAnalysis?.topClearance ?? data.settings.topClearance);
   addPageTitle(doc, "Stabelhøyde mot tillatt snittvekt", "Høyere stabel gir lavere tillatt gjennomsnittsvekt i containerne over bunnnivået");
   drawBarChart(doc, 14, 39, 130, 55, "Maks snittnyttelast i øvre containere", series.map((item) => ({ label: `${item.levels} høy`, value: Math.round(item.maxAveragePayload) })), colors.cyan, " kg");
   drawBarChart(doc, 156, 39, 127, 55, "Minste takhøyde inkl. klaring", series.map((item) => ({ label: `${item.levels} høy`, value: Number(item.requiredRoofHeight.toFixed(2)) })), colors.teal, " m");
