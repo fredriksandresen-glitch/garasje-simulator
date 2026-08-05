@@ -681,6 +681,192 @@ function addStackingPage(doc, data) {
   doc.text(doc.splitTextToSize("Test-screening er en konservativ sammenligning der stacking-testlasten behandles som samlet last over nederste container: 1 + gulv(testlast / lastet bruttovekt), deretter begrenset av takhøyde og registrert sertifisert maksimum. Dette er ikke en godkjenning av operativ stabling. Underlag, hjørnebeslag, lastfordeling, seismikk, brann og leverandørens stablingsinstruks må verifiseres.", 270), 14, 190);
 }
 
+function buildMixedStackScenario(data) {
+  const tare = Number.isFinite(data.container.tare) ? data.container.tare : 0;
+  const preferredLoads = ["kokille", "steel2", "drum210"];
+  const levels = preferredLoads.map((key, index) => {
+    const row = data.loadRows.find((item) => item.key === key) || data.loadRows[index];
+    const quantity = Math.max(0, row?.practicalCount || 0);
+    const payloadWeight = quantity * (row?.load?.defaultWeight || 0);
+    return {
+      key: row?.key || `level-${index + 1}`,
+      label: row?.load?.shortLabel || row?.load?.label || "Last",
+      quantity,
+      payloadWeight,
+      grossWeight: tare + payloadWeight,
+      color: row?.load?.shareKey === "drum" ? colors.amber : row?.load?.shareKey === "kokille" ? [105, 168, 107] : [63, 131, 184]
+    };
+  });
+  levels.push({ key: "empty", label: "Tom container", quantity: 0, payloadWeight: 0, grossWeight: tare, color: [221, 230, 226] });
+
+  for (let index = 0; index < levels.length; index += 1) {
+    levels[index].loadAbove = levels.slice(index + 1).reduce((sum, level) => sum + level.grossWeight, 0);
+  }
+
+  const stackHeight = levels.length * data.container.height;
+  const requiredRoofHeight = stackHeight + data.settings.topClearance;
+  const stackingTestLoad = getStackingTestLoad(data.container);
+  const certifiedLimit = getCertifiedStackLimit(data.container);
+  const maxGross = Number.isFinite(data.container.maxGross) ? data.container.maxGross : Infinity;
+  const maxPayload = Number.isFinite(data.container.payload) ? data.container.payload : Infinity;
+  levels.forEach((level) => {
+    level.stackingMargin = Number.isFinite(stackingTestLoad) ? stackingTestLoad - level.loadAbove : null;
+    level.pass = level.payloadWeight <= maxPayload && level.grossWeight <= maxGross && (!Number.isFinite(stackingTestLoad) || level.loadAbove <= stackingTestLoad);
+  });
+  const roofMargin = data.settings.roofHeight - requiredRoofHeight;
+  const totalWeight = levels.reduce((sum, level) => sum + level.grossWeight, 0);
+  const pass = roofMargin >= 0 && levels.length <= certifiedLimit && levels.every((level) => level.pass);
+  return { levels, stackHeight, requiredRoofHeight, roofMargin, totalWeight, stackingTestLoad, pass };
+}
+
+function getAverageStackWeightSeries(container, topClearance) {
+  const tare = Number.isFinite(container.tare) ? container.tare : 0;
+  const maxPayload = Number.isFinite(container.payload) ? container.payload : Math.max(0, (container.maxGross || tare) - tare);
+  const maxGross = Number.isFinite(container.maxGross) ? container.maxGross : tare + maxPayload;
+  const stackingTestLoad = getStackingTestLoad(container);
+  const certifiedLimit = Math.min(12, Number.isFinite(getCertifiedStackLimit(container)) ? getCertifiedStackLimit(container) : 9);
+  return Array.from({ length: Math.max(1, certifiedLimit) }, (_, index) => {
+    const levels = index + 1;
+    const stackingAverageGross = levels > 1 && Number.isFinite(stackingTestLoad) ? stackingTestLoad / (levels - 1) : maxGross;
+    const maxAverageGross = Math.min(maxGross, stackingAverageGross);
+    const maxAveragePayload = Math.max(0, Math.min(maxPayload, maxAverageGross - tare));
+    return {
+      levels,
+      stackHeight: levels * container.height,
+      requiredRoofHeight: levels * container.height + topClearance,
+      maxAverageGross,
+      maxAveragePayload,
+      governing: levels > 1 && stackingAverageGross < maxGross ? "Stacking test" : "Max payload"
+    };
+  });
+}
+
+function drawMixedStackElevation(doc, x, y, width, height, data, scenario) {
+  const displayHeight = Math.max(data.settings.roofHeight, scenario.requiredRoofHeight, 1);
+  const scale = (height - 8) / displayHeight;
+  const groundY = y + height - 3;
+  const roofY = groundY - data.settings.roofHeight * scale;
+  const containerHeight = data.container.height * scale;
+  const containerWidth = Math.min(width - 24, data.container.length * scale);
+  const containerX = x + (width - containerWidth) / 2;
+
+  doc.setDrawColor(...colors.line);
+  doc.setFillColor(...colors.paper);
+  doc.roundedRect(x, y, width, height, 2, 2, "FD");
+  doc.setDrawColor(...colors.ink);
+  doc.setLineWidth(0.7);
+  doc.line(x + 5, roofY, x + width - 5, roofY);
+  doc.line(x + 5, groundY, x + width - 5, groundY);
+  setText(doc, 5.8, colors.ink, "bold");
+  doc.text(`Tak ${formatMeters(data.settings.roofHeight, 2)}`, x + 6, roofY - 2);
+  doc.text("Gulv +/-0,00", x + 6, groundY + 4);
+
+  scenario.levels.forEach((level, index) => {
+    const levelY = groundY - (index + 1) * containerHeight;
+    doc.setFillColor(...level.color);
+    doc.setDrawColor(...(level.pass ? colors.green : colors.red));
+    doc.roundedRect(containerX, levelY, containerWidth, containerHeight, 1, 1, "FD");
+    setText(doc, 6.2, colors.ink, "bold");
+    doc.text(`Nivå ${index + 1}${index === 0 ? " - bunn" : ""}`, containerX + 3, levelY + 6);
+    setText(doc, 5.4, colors.ink);
+    doc.text(level.quantity > 0 ? `${level.quantity} x ${level.label}` : level.label, containerX + 3, levelY + 11);
+    doc.text(`${formatNumber(level.grossWeight)} kg`, containerX + containerWidth - 3, levelY + 6, { align: "right" });
+    doc.text(`over ${formatNumber(level.loadAbove)} kg`, containerX + containerWidth - 3, levelY + 11, { align: "right" });
+  });
+
+  if (data.settings.topClearance > 0) {
+    const clearanceTop = groundY - scenario.stackHeight * scale - data.settings.topClearance * scale;
+    doc.setFillColor(248, 235, 197);
+    doc.setDrawColor(...colors.amber);
+    doc.rect(containerX, clearanceTop, containerWidth, data.settings.topClearance * scale, "FD");
+    setText(doc, 5.2, colors.ink, "bold");
+    doc.text(`${formatNumber(data.settings.topClearance, 2)} m klaring`, containerX + containerWidth / 2, clearanceTop + Math.max(3, data.settings.topClearance * scale / 2 + 1), { align: "center" });
+  }
+
+  doc.setDrawColor(...colors.muted);
+  doc.line(x + width - 8, groundY, x + width - 8, groundY - scenario.stackHeight * scale);
+  setText(doc, 5.5, colors.muted, "bold");
+  doc.text(`Stabel ${formatMeters(scenario.stackHeight, 3)}`, x + width - 10, groundY - scenario.stackHeight * scale / 2, { angle: 90, align: "center" });
+}
+
+function addMixedStackAnalysisPage(doc, data) {
+  doc.addPage();
+  const scenario = buildMixedStackScenario(data);
+  addPageTitle(doc, "Blandet stableanalyse", "Sideoppriss, takhøyde, klaring, last per nivå og stacking-testmargin");
+  drawMixedStackElevation(doc, 14, 36, 94, 151, data, scenario);
+
+  drawMetricCard(doc, 116, 36, 52, "Valgt takhøyde", formatMeters(data.settings.roofHeight, 2), `krav inkl. klaring ${formatMeters(scenario.requiredRoofHeight, 2)}`);
+  drawMetricCard(doc, 173, 36, 52, "Stabelhøyde", formatMeters(scenario.stackHeight, 3), `${scenario.levels.length} containere i høyden`);
+  drawMetricCard(doc, 230, 36, 53, "Samlet vekt", `${formatNumber(scenario.totalWeight)} kg`, "tare og last i alle nivåer");
+  drawMetricCard(doc, 116, 66, 52, "Toppklaring", formatMeters(data.settings.topClearance, 3), scenario.roofMargin >= 0 ? `${formatMillimeters(scenario.roofMargin)} ekstra fri høyde` : `${formatMillimeters(scenario.roofMargin)} konflikt`);
+  drawMetricCard(doc, 173, 66, 52, "Last over bunn", `${formatNumber(scenario.levels[0]?.loadAbove || 0)} kg`, "summert bruttovekt over nivå 1");
+  drawMetricCard(doc, 230, 66, 53, "Testlastmargin", Number.isFinite(scenario.levels[0]?.stackingMargin) ? `${formatNumber(scenario.levels[0].stackingMargin)} kg` : "Ikke oppgitt", Number.isFinite(scenario.stackingTestLoad) ? `mot ${formatNumber(scenario.stackingTestLoad)} kg` : "testverdi mangler");
+
+  doc.setFillColor(...(scenario.pass ? [228, 244, 236] : [250, 231, 226]));
+  doc.setDrawColor(...(scenario.pass ? colors.green : colors.red));
+  doc.roundedRect(116, 96, 167, 11, 2, 2, "FD");
+  setText(doc, 7.2, scenario.pass ? colors.green : colors.red, "bold");
+  doc.text(scenario.pass ? "Scenarioet er innenfor registrerte geometri- og vektgrenser" : "Scenarioet overskrider én eller flere registrerte grenser", 120, 103);
+
+  const headers = [["Nivå", 118], ["Last", 136], ["Nyttelast", 184], ["Bruttovekt", 214], ["Last over", 246], ["Margin", 276]];
+  doc.setFillColor(...colors.dark);
+  doc.roundedRect(116, 112, 167, 10, 1.5, 1.5, "F");
+  headers.forEach(([label, columnX]) => {
+    setText(doc, 6.1, colors.white, "bold");
+    doc.text(label, columnX, 118.5, { align: columnX > 180 ? "right" : "left" });
+  });
+  scenario.levels.forEach((level, index) => {
+    const rowY = 123 + index * 13;
+    doc.setFillColor(...(index % 2 === 0 ? [247, 250, 249] : [239, 245, 243]));
+    doc.setDrawColor(...colors.line);
+    doc.rect(116, rowY, 167, 11.5, "FD");
+    setText(doc, 6.2, colors.ink, index === 0 ? "bold" : "normal");
+    doc.text(String(index + 1), 121, rowY + 7.2);
+    doc.text(level.quantity > 0 ? `${level.quantity} x ${level.label}` : level.label, 136, rowY + 7.2);
+    doc.text(`${formatNumber(level.payloadWeight)} kg`, 184, rowY + 7.2, { align: "right" });
+    doc.text(`${formatNumber(level.grossWeight)} kg`, 214, rowY + 7.2, { align: "right" });
+    doc.text(`${formatNumber(level.loadAbove)} kg`, 246, rowY + 7.2, { align: "right" });
+    doc.setTextColor(...(level.stackingMargin === null || level.stackingMargin >= 0 ? colors.green : colors.red));
+    doc.text(level.stackingMargin === null ? "-" : `${formatNumber(level.stackingMargin)} kg`, 280, rowY + 7.2, { align: "right" });
+  });
+
+  setText(doc, 5.8, colors.muted);
+  doc.text(doc.splitTextToSize("Blandet eksempel: kokiller i bunncontainer, stålkasse V2 i nivå 2, 210L-tønner i nivå 3 og tom toppcontainer. Last over et nivå er summen av bruttovektene i alle containere over. Rekkefølge og lastfordeling er et screeningsscenario, ikke en operativ stablegodkjenning.", 165), 116, 180);
+}
+
+function addStackWeightEnvelopePage(doc, data) {
+  doc.addPage();
+  const series = getAverageStackWeightSeries(data.container, data.settings.topClearance);
+  addPageTitle(doc, "Stabelhøyde mot tillatt snittvekt", "Høyere stabel gir lavere tillatt gjennomsnittsvekt i containerne over bunnnivået");
+  drawBarChart(doc, 14, 39, 130, 55, "Maks snittnyttelast i øvre containere", series.map((item) => ({ label: `${item.levels} høy`, value: Math.round(item.maxAveragePayload) })), colors.cyan, " kg");
+  drawBarChart(doc, 156, 39, 127, 55, "Minste takhøyde inkl. klaring", series.map((item) => ({ label: `${item.levels} høy`, value: Number(item.requiredRoofHeight.toFixed(2)) })), colors.teal, " m");
+
+  const headers = [["Nivåer", 16], ["Stabelhøyde", 48], ["Min. tak inkl. klaring", 91], ["Maks snitt bruttovekt*", 144], ["Maks snitt nyttelast*", 205], ["Dimensjonerende", 258]];
+  doc.setFillColor(...colors.dark);
+  doc.roundedRect(12, 102, 273, 10, 1.5, 1.5, "F");
+  headers.forEach(([label, x]) => {
+    setText(doc, 6.2, colors.white, "bold");
+    doc.text(label, x, 108.5, { align: x > 40 && x < 250 ? "right" : "left" });
+  });
+  series.forEach((item, index) => {
+    const rowY = 113 + index * 8.1;
+    doc.setFillColor(...(index % 2 === 0 ? [247, 250, 249] : [239, 245, 243]));
+    doc.setDrawColor(...colors.line);
+    doc.rect(12, rowY, 273, 7.3, "FD");
+    setText(doc, 6.1, colors.ink, item.governing === "Stacking test" ? "bold" : "normal");
+    doc.text(String(item.levels), 20, rowY + 5, { align: "center" });
+    doc.text(formatMeters(item.stackHeight, 3), 48, rowY + 5, { align: "right" });
+    doc.text(formatMeters(item.requiredRoofHeight, 3), 91, rowY + 5, { align: "right" });
+    doc.text(`${formatNumber(item.maxAverageGross)} kg`, 144, rowY + 5, { align: "right" });
+    doc.text(`${formatNumber(item.maxAveragePayload)} kg`, 205, rowY + 5, { align: "right" });
+    doc.setTextColor(...(item.governing === "Stacking test" ? colors.amber : colors.green));
+    doc.text(item.governing, 258, rowY + 5);
+  });
+
+  setText(doc, 5.8, colors.muted);
+  doc.text(doc.splitTextToSize("* Snittgrensen gjelder de N-1 containerne over bunncontaineren: stacking test load / (N-1), begrenset av max gross og max payload per container. Bunncontainerens egen last inngår ikke i 'last over bunn', men må fortsatt være innenfor max payload og max gross. Ved lave stabler er max payload dimensjonerende; når stabelen blir høyere overtar stacking-testverdien og tillatt gjennomsnittsvekt faller.", 270), 14, 190);
+}
+
 function addLoadMatrixPage(doc, data) {
   doc.addPage();
   addPageTitle(doc, "Lastkapasitet og innlastingskontroll", "Alle registrerte lasttyper mot valgt container");
@@ -958,6 +1144,8 @@ export async function generateContainerStudyPdf(input) {
   if (data.warehouseAnalysis?.scenarios?.length) addWarehouseComparisonPage(doc, data);
   if (data.warehouseAnalysis?.containerGapAisleComparison?.length) addAisleCapacityPage(doc, data);
   addStackingPage(doc, data);
+  addMixedStackAnalysisPage(doc, data);
+  addStackWeightEnvelopePage(doc, data);
   addLoadMatrixPage(doc, data);
   addLoadWeightAnalysisPage(doc, data);
   addDrumWeightAnalysisPage(doc, data);

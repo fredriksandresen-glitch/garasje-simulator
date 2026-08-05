@@ -1311,7 +1311,7 @@ function ContainerStudy({ selectedContainerKeys, onToggleContainer, onContinue }
 
       <section className="study-report-panel" aria-label="PDF-rapport for containerstudie">
         <div className="study-report-heading">
-          <div><p className="eyebrow">Dokumentasjon</p><h3>PDF-rapport for valgt container</h3><p>Detaljert rapport med samme arkitektmodell som appen, alle lasttyper i 3D, tre lageralternativer, kapasitetsdiagrammer, stabling og klaringer.</p></div>
+          <div><p className="eyebrow">Dokumentasjon</p><h3>PDF-rapport for valgt container</h3><p>Detaljert rapport med samme arkitektmodell som appen, alle lasttyper i 3D, blandet stableanalyse, takhøyde/vekt-diagrammer, tre lageralternativer og klaringer.</p></div>
           <div className="study-report-actions">
             <button type="button" className="study-report-button" onClick={generateReport} disabled={reportState.generating}>
               <FileDown size={19} />{reportState.generating ? "Bygger rapport …" : "Generer PDF-rapport"}
