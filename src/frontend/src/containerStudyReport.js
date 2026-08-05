@@ -695,8 +695,12 @@ function buildMixedStackScenario(data) {
   ];
   const storedLevels = Array.isArray(stackAnalysis.levels) ? stackAnalysis.levels : [];
   const sourceLevels = storedLevels.filter((level) => level?.loadKey !== "empty" && Math.max(0, Math.round(Number(level?.quantity) || 0)) > 0);
-  const levelDefinitions = sourceLevels.length > 0 ? sourceLevels : fallbackLevels.filter((level) => level.quantity > 0);
-  const levels = levelDefinitions.map((definition, index) => {
+  const requestedLevelDefinitions = sourceLevels.length > 0 ? sourceLevels : fallbackLevels.filter((level) => level.quantity > 0);
+  const roofHeight = clampNumber(stackAnalysis.roofHeight, data.settings.roofHeight, 1);
+  const topClearance = clampNumber(stackAnalysis.topClearance, data.settings.topClearance);
+  const packageSpacing = clampNumber(stackAnalysis.packageSpacing, data.spacing || 0.05);
+  const maxLevelsByRoof = Math.max(0, Math.floor((roofHeight - topClearance + 1e-9) / data.container.height));
+  const requestedLevels = requestedLevelDefinitions.map((definition, index) => {
     const row = data.loadRows.find((item) => item.key === definition.loadKey) || data.loadRows[index];
     const quantity = Math.max(0, Math.round(Number(definition.quantity) || 0));
     const storedWeight = Number(stackAnalysis.loadWeights?.[definition.loadKey]);
@@ -713,16 +717,17 @@ function buildMixedStackScenario(data) {
       color: row?.load?.shareKey === "drum" ? colors.amber : row?.load?.shareKey === "kokille" ? [105, 168, 107] : [63, 131, 184]
     };
   });
+  const levels = requestedLevels.slice(0, maxLevelsByRoof);
+  const omittedLevels = requestedLevels.slice(maxLevelsByRoof);
 
   for (let index = 0; index < levels.length; index += 1) {
     levels[index].loadAbove = levels.slice(index + 1).reduce((sum, level) => sum + level.grossWeight, 0);
   }
 
   const stackHeight = levels.length * data.container.height;
-  const roofHeight = clampNumber(stackAnalysis.roofHeight, data.settings.roofHeight, 1);
-  const topClearance = clampNumber(stackAnalysis.topClearance, data.settings.topClearance);
-  const packageSpacing = clampNumber(stackAnalysis.packageSpacing, data.spacing || 0.05);
+  const requestedStackHeight = requestedLevels.length * data.container.height;
   const requiredRoofHeight = stackHeight + topClearance;
+  const requestedRequiredRoofHeight = requestedStackHeight + topClearance;
   const stackingTestLoad = Number.isFinite(Number(specs.stackingTestLoad)) ? Number(specs.stackingTestLoad) : getStackingTestLoad(data.container);
   const certifiedLimit = Number.isFinite(Number(specs.certifiedMax)) && Number(specs.certifiedMax) > 0 ? Number(specs.certifiedMax) : getCertifiedStackLimit(data.container);
   const maxGross = Number.isFinite(Number(specs.maxGross)) && Number(specs.maxGross) > 0 ? Number(specs.maxGross) : Number.isFinite(data.container.maxGross) ? data.container.maxGross : Infinity;
@@ -735,7 +740,7 @@ function buildMixedStackScenario(data) {
   const roofMargin = roofHeight - requiredRoofHeight;
   const totalWeight = levels.reduce((sum, level) => sum + level.grossWeight, 0);
   const pass = roofMargin >= 0 && levels.length <= certifiedLimit && levels.every((level) => level.pass);
-  return { levels, stackHeight, requiredRoofHeight, roofHeight, topClearance, packageSpacing, roofMargin, totalWeight, stackingTestLoad, maxGross, maxPayload, certifiedLimit, pass };
+  return { levels, omittedLevels, requestedLevelCount: requestedLevels.length, stackHeight, requestedStackHeight, requiredRoofHeight, requestedRequiredRoofHeight, roofHeight, topClearance, packageSpacing, roofMargin, totalWeight, stackingTestLoad, maxGross, maxPayload, certifiedLimit, pass };
 }
 
 function getAverageStackWeightSeries(container, topClearance) {
@@ -902,21 +907,23 @@ function drawMixedStackElevation(doc, x, y, width, height, data, scenario) {
 function addMixedStackAnalysisPage(doc, data) {
   doc.addPage();
   const scenario = buildMixedStackScenario(data);
+  const fullScenarioPass = scenario.pass && scenario.omittedLevels.length === 0;
+  const omittedCount = scenario.omittedLevels.length;
   addPageTitle(doc, "Stableanalyse - lagret scenario", "Samme nivårekkefølge, takhøyde, klaring og lastdata som i Stableanalyse-fanen");
   drawMixedStackElevation(doc, 14, 36, 119, 151, data, scenario);
 
-  drawMetricCard(doc, 141, 36, 67, "Valgt takhøyde", formatMeters(scenario.roofHeight, 2), `krav inkl. klaring ${formatMeters(scenario.requiredRoofHeight, 2)}`);
-  drawMetricCard(doc, 216, 36, 67, "Stabelhøyde", formatMeters(scenario.stackHeight, 3), `${scenario.levels.length} lastede containere i høyden`);
+  drawMetricCard(doc, 141, 36, 67, "Valgt takhøyde", formatMeters(scenario.roofHeight, 2), omittedCount > 0 ? `full stabel krever ${formatMeters(scenario.requestedRequiredRoofHeight, 2)}` : `krav inkl. klaring ${formatMeters(scenario.requiredRoofHeight, 2)}`);
+  drawMetricCard(doc, 216, 36, 67, "Stabelhøyde", formatMeters(scenario.stackHeight, 3), omittedCount > 0 ? `${scenario.levels.length} av ${scenario.requestedLevelCount} nivåer får plass` : `${scenario.levels.length} lastede containere i høyden`);
   drawMetricCard(doc, 141, 66, 67, "Toppklaring", formatMeters(scenario.topClearance, 3), scenario.roofMargin >= 0 ? `${formatMillimeters(scenario.roofMargin)} ekstra fri høyde` : `${formatMillimeters(scenario.roofMargin)} konflikt`);
-  drawMetricCard(doc, 216, 66, 67, "Samlet vekt", `${formatNumber(scenario.totalWeight)} kg`, "tare og last i alle nivåer");
+  drawMetricCard(doc, 216, 66, 67, "Samlet vekt", `${formatNumber(scenario.totalWeight)} kg`, "tare og last i viste nivåer");
   drawMetricCard(doc, 141, 96, 67, "Last over bunn", `${formatNumber(scenario.levels[0]?.loadAbove || 0)} kg`, "summert bruttovekt over nivå 1");
   drawMetricCard(doc, 216, 96, 67, "Testlastmargin", Number.isFinite(scenario.levels[0]?.stackingMargin) ? `${formatNumber(scenario.levels[0].stackingMargin)} kg` : "Ikke oppgitt", Number.isFinite(scenario.stackingTestLoad) ? `mot ${formatNumber(scenario.stackingTestLoad)} kg` : "testverdi mangler");
 
-  doc.setFillColor(...(scenario.pass ? [228, 244, 236] : [250, 231, 226]));
-  doc.setDrawColor(...(scenario.pass ? colors.green : colors.red));
+  doc.setFillColor(...(fullScenarioPass ? [228, 244, 236] : [250, 231, 226]));
+  doc.setDrawColor(...(fullScenarioPass ? colors.green : colors.red));
   doc.roundedRect(141, 126, 142, 10, 2, 2, "FD");
-  setText(doc, 7.2, scenario.pass ? colors.green : colors.red, "bold");
-  doc.text(scenario.pass ? "Lagret scenario er innenfor registrerte grenser" : "Lagret scenario overskrider én eller flere grenser", 145, 132.5);
+  setText(doc, 7.2, fullScenarioPass ? colors.green : colors.red, "bold");
+  doc.text(omittedCount > 0 ? `${omittedCount} nivå${omittedCount === 1 ? "" : "er"} utelatt - får ikke plass under valgt tak` : scenario.pass ? "Lagret scenario er innenfor registrerte grenser" : "Lagret scenario overskrider én eller flere grenser", 145, 132.5);
 
   const headers = [["Nivå", 143], ["Last", 158], ["Nyttelast", 208], ["Brutto", 234], ["Over", 258], ["Margin", 280]];
   doc.setFillColor(...colors.dark);
@@ -943,7 +950,8 @@ function addMixedStackAnalysisPage(doc, data) {
   });
 
   setText(doc, 5.8, colors.muted);
-  doc.text(doc.splitTextToSize("Nivårekkefølge, antall, kollivekter, takhøyde og toppklaring er hentet fra den sist lagrede Stableanalyse-fanen. Tomme nivåer tas ikke med. Last over et nivå er summen av bruttovektene i alle lastede containere over. Screeningen er ikke en operativ stablegodkjenning.", 140), 141, 187);
+  const heightNote = omittedCount > 0 ? ` ${omittedCount === 1 ? "Ett lastet nivå er" : `${omittedCount} lastede nivåer er`} utelatt fordi full stabel krever ${formatMeters(scenario.requestedRequiredRoofHeight, 2)} takhøyde.` : "";
+  doc.text(doc.splitTextToSize(`Nivårekkefølge, antall, kollivekter, takhøyde og toppklaring er hentet fra den sist lagrede Stableanalyse-fanen. Tomme nivåer tas ikke med.${heightNote} Last over et nivå er summen av bruttovektene i alle viste containere over. Screeningen er ikke en operativ stablegodkjenning.`, 140), 141, 187);
 }
 
 function addStackWeightEnvelopePage(doc, data) {
